@@ -261,7 +261,7 @@ Wish I could customize my dashboard layout`;
             <p style={{ fontSize: 16, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>
               {stage === "analyzing" ? "Identifying themes & priorities..." : "Generating feature spec..."}
             </p>
-            <p style={{ color: "#475569", fontSize: 13 }}>Claude Haiku is analyzing your data</p>
+            <p style={{ color: "#475569", fontSize: 13 }}>AI is analyzing your data</p>
             <div style={{ width: 200, margin: "24px auto", background: "#1e1e2e", borderRadius: 4, height: 4, overflow: "hidden" }}>
               <div style={{ height: "100%", background: "linear-gradient(90deg,#4f46e5,#7c3aed)", borderRadius: 4, animation: "slide 1.5s ease infinite" }} />
             </div>
