@@ -4,7 +4,7 @@
 
 ![PM·AI Demo](https://img.shields.io/badge/status-live-22c55e?style=flat-square) ![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js) ![OpenRouter](https://img.shields.io/badge/AI-OpenRouter-f97316?style=flat-square) ![Vercel](https://img.shields.io/badge/deployed-Vercel-black?style=flat-square&logo=vercel)
 
-**[→ Live Demo](https://pm-lbkz02yy1-arkham2424s-projects.vercel.app/)**
+**[→ Live Demo]([https://pm-lbkz02yy1-arkham2424s-projects.vercel.app/](https://pm-ai-eight.vercel.app/))**
 
 ---
 
