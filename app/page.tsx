@@ -1,5 +1,4 @@
 "use client";
-import jsPDF from "jspdf";
 import { useState, useCallback, useEffect } from "react";
 const SYSTEM_PROMPT_ANALYZE = `You are a senior product manager AI. You will receive user feedback.
 
@@ -70,94 +69,120 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
   if (parsed.success_metrics && !Array.isArray(parsed.success_metrics)) parsed.success_metrics = Object.values(parsed.success_metrics);
   if (parsed.user_stories && !Array.isArray(parsed.user_stories)) parsed.user_stories = Object.values(parsed.user_stories);
   if (parsed.dev_tasks && !Array.isArray(parsed.dev_tasks)) parsed.dev_tasks = Object.values(parsed.dev_tasks);
+  parsed.dev_tasks = parsed.dev_tasks?.map((t: unknown, i: number) => {
+    if (typeof t === "string") return { id: String(i), title: t, description: "", estimate_hours: 0 };
+    if (typeof t === "object" && t !== null) {
+      const task = t as Record<string, unknown>;
+      return {
+        id: String(task.id ?? i),
+        title: String(task.title ?? task.name ?? "Task"),
+        description: String(task.description ?? task.details ?? ""),
+        estimate_hours: Number(task.estimate_hours ?? task.hours ?? task.time ?? 0),
+      };
+    }
+    return { id: String(i), title: "Task", description: "", estimate_hours: 0 };
+  });
   return parsed;
 };
 
 const downloadPDF = (spec: Spec) => {
-  const doc = new jsPDF();
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 20;
-  const maxWidth = pageWidth - margin * 2;
-  let y = 20;
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return;
 
-  const addText = (text: string, size: number, bold = false, color = "#0a0a0a") => {
-    doc.setFontSize(size);
-    doc.setFont("helvetica", bold ? "bold" : "normal");
-    doc.setTextColor(color);
-    const lines = doc.splitTextToSize(text, maxWidth);
-    if (y + lines.length * size * 0.4 > 280) { doc.addPage(); y = 20; }
-    doc.text(lines, margin, y);
-    y += lines.length * size * 0.45 + 2;
-  };
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>${spec.title}</title>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'JetBrains Mono', monospace; background: white; color: #0a0a0a; padding: 48px; max-width: 800px; margin: 0 auto; }
+        .header { border-bottom: 3px solid #0a0a0a; padding-bottom: 20px; margin-bottom: 28px; display: flex; justify-content: space-between; align-items: flex-end; }
+        .logo { font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 900; }
+        .date { font-size: 10px; letter-spacing: 2px; color: #666; text-transform: uppercase; }
+        .title { font-family: 'Playfair Display', serif; font-size: 36px; font-weight: 900; letter-spacing: -1px; margin-bottom: 8px; line-height: 1.1; }
+        .section { border-top: 1px solid #ddd; padding: 20px 0; page-break-inside: avoid; }
+        .section-label { font-size: 8px; letter-spacing: 4px; text-transform: uppercase; color: #999; margin-bottom: 12px; }
+        .problem { font-size: 14px; line-height: 1.8; color: #2a2a2a; }
+        .pull-quote { border-left: 3px solid #0a0a0a; padding: 10px 16px; margin: 16px 0; font-family: 'Playfair Display', serif; font-size: 14px; font-style: italic; color: #444; line-height: 1.6; }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .item { display: flex; gap: 12px; margin-bottom: 10px; font-size: 12px; line-height: 1.7; color: #2a2a2a; }
+        .bullet { color: #999; flex-shrink: 0; }
+        .task { display: grid; grid-template-columns: 28px 1fr auto; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee; }
+        .task-num { font-size: 10px; color: #999; padding-top: 2px; }
+        .task-title { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+        .task-desc { font-size: 11px; color: #555; line-height: 1.6; }
+        .task-hours { font-size: 10px; color: #999; white-space: nowrap; padding-top: 2px; }
+        .footer { border-top: 1px solid #ddd; padding-top: 16px; margin-top: 32px; font-size: 10px; color: #999; letter-spacing: 1px; display: flex; justify-content: space-between; }
+        @media print { body { padding: 32px; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="logo">PM·AI</div>
+        <div class="date">Generated ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>
+      </div>
 
-  const addDivider = () => {
-    doc.setDrawColor("#C4BFB6");
-    doc.setLineWidth(0.3);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 6;
-  };
+      <div style="margin-bottom: 28px;">
+        <div style="font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #999; margin-bottom: 8px;">Product Spec</div>
+        <div class="title">${spec.title}</div>
+      </div>
 
-  const addLabel = (text: string) => {
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor("#666666");
-    doc.text(text.toUpperCase(), margin, y);
-    y += 8;
-    addDivider();
-  };
+      <div class="section">
+        <div class="section-label">Problem Statement</div>
+        <p class="problem">${spec.problem_statement}</p>
+        <div class="pull-quote">${spec.why_now}</div>
+      </div>
 
-  // Header
-  addText("PM·AI", 28, true, "#0a0a0a");
-  addText("Product Spec", 12, false, "#666666");
-  y += 4;
-  addDivider();
-  y += 4;
+      <div class="two-col">
+        <div class="section">
+          <div class="section-label">Success Metrics</div>
+          ${spec.success_metrics?.map(m => `<div class="item"><span class="bullet">◆</span><span>${m}</span></div>`).join("")}
+        </div>
+        <div class="section">
+          <div class="section-label">User Stories</div>
+          ${spec.user_stories?.map(s => `<div class="item"><span class="bullet">→</span><span>${s}</span></div>`).join("")}
+        </div>
+      </div>
 
-  // Title
-  addText(spec.title, 20, true);
-  y += 4;
+      <div class="two-col">
+        <div class="section">
+          <div class="section-label">UI Changes</div>
+          ${spec.ui_changes?.map(u => `<div class="item"><span class="bullet">—</span><span>${u}</span></div>`).join("")}
+        </div>
+        <div class="section">
+          <div class="section-label">Data Model Changes</div>
+          ${spec.data_model_changes?.map(d => `<div class="item"><span class="bullet">—</span><span>${d}</span></div>`).join("")}
+        </div>
+      </div>
 
-  // Problem
-  addLabel("Problem Statement");
-  addText(spec.problem_statement, 11);
-  y += 2;
-  addText(`"${spec.why_now}"`, 11, false, "#555555");
-  y += 6;
+      <div class="section">
+        <div class="section-label">Dev Tasks</div>
+        ${spec.dev_tasks?.map((t, i) => `
+          <div class="task">
+            <div class="task-num">${String(i + 1).padStart(2, "0")}</div>
+            <div>
+              <div class="task-title">${t.title}</div>
+              <div class="task-desc">${t.description}</div>
+            </div>
+            <div class="task-hours">~${t.estimate_hours}h</div>
+          </div>
+        `).join("")}
+      </div>
 
-  // Success Metrics
-  addLabel("Success Metrics");
-  spec.success_metrics?.forEach((m) => { addText(`◆  ${m}`, 10); y += 1; });
-  y += 4;
+      <div class="footer">
+        <span>PM·AI — Cursor for Product Managers</span>
+        <span>pm-ai-eight.vercel.app</span>
+      </div>
 
-  // User Stories
-  addLabel("User Stories");
-  spec.user_stories?.forEach((s) => { addText(`→  ${s}`, 10); y += 1; });
-  y += 4;
-
-  // UI Changes
-  addLabel("UI Changes");
-  spec.ui_changes?.forEach((u) => { addText(`—  ${u}`, 10); y += 1; });
-  y += 4;
-
-  // Data Model
-  addLabel("Data Model Changes");
-  spec.data_model_changes?.forEach((d) => { addText(`—  ${d}`, 10); y += 1; });
-  y += 4;
-
-  // Dev Tasks
-  addLabel("Dev Tasks");
-  spec.dev_tasks?.forEach((t, i) => {
-    addText(`${String(i + 1).padStart(2, "0")}  ${t.title}  (~${t.estimate_hours}h)`, 10, true);
-    addText(`    ${t.description}`, 9, false, "#555555");
-    y += 2;
-  });
-
-  // Footer
-  y += 8;
-  addDivider();
-  addText(`Generated by PM·AI · ${new Date().toLocaleDateString()}`, 8, false, "#999999");
-
-  doc.save(`${spec.title.replace(/\s+/g, "-").toLowerCase()}.pdf`);
+      <script>
+        window.onload = () => { window.print(); }
+      </script>
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
 };
 
 
@@ -642,7 +667,7 @@ export default function App() {
                   navigator.clipboard.writeText(md);
                 }}>Copy MD</button>
                 <button className="btn-ghost" onClick={() => downloadPDF(spec)}>
-                  Download PDF
+                  Print / Save PDF
                 </button>
               </div>
             </div>
