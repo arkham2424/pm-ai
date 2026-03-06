@@ -31,21 +31,38 @@ Return a JSON array of 4-6 objects with:
 
 Return ONLY valid JSON array, no markdown, no explanation.`;
 
-const SYSTEM_PROMPT_SPEC = `You are a senior product manager and strategist.
+const SYSTEM_PROMPT_SPEC_SOFTWARE = `You are a senior product manager and tech lead.
 
 You will receive a theme, problem, and optional product context.
 
-Based on the product context, decide what kind of product this is (software app, physical product, service, etc.) and adapt the spec accordingly.
-
 Return a JSON object with:
 - title: string
-- product_type: string (e.g. "SaaS app", "Mobile app", "Physical product", "Service", "E-commerce")
+- product_type: string (e.g. "SaaS app", "Mobile app", "Web app")
 - problem_statement: string
 - why_now: string
 - success_metrics: string[]
 - user_stories: string[]
-- recommended_changes: string[] (generic improvements suited to this product type — NOT always UI/data model)
-- action_items: {id: string, title: string, description: string, estimate_hours: number}[] (concrete next steps, adjust effort unit if not software e.g. days for physical products)
+- ui_changes: string[]
+- data_model_changes: string[]
+- dev_tasks: {id: string, title: string, description: string, estimate_hours: number}[]
+
+Return ONLY valid JSON, no markdown.`;
+
+const SYSTEM_PROMPT_SPEC_OTHER = `You are a senior product manager and strategist.
+
+You will receive a theme, problem, and optional product context.
+
+Based on the product context, decide what kind of product this is (physical product, service, e-commerce, restaurant, etc.) and adapt the spec accordingly.
+
+Return a JSON object with:
+- title: string
+- product_type: string (e.g. "Physical product", "Service", "E-commerce", "Restaurant", "Retail")
+- problem_statement: string
+- why_now: string
+- success_metrics: string[]
+- user_stories: string[]
+- recommended_changes: string[] (improvements suited to this product type — NOT software UI/data model)
+- action_items: {id: string, title: string, description: string, estimate_hours: number}[] (concrete next steps; adjust effort units if not software)
 
 Return ONLY valid JSON, no markdown.`;
 
@@ -66,9 +83,28 @@ interface Spec {
   why_now: string;
   success_metrics: string[];
   user_stories: string[];
-  recommended_changes: string[];
-  action_items: { id: string; title: string; description: string; estimate_hours: number }[];
+  // software mode
+  ui_changes?: string[];
+  data_model_changes?: string[];
+  dev_tasks?: { id: string; title: string; description: string; estimate_hours: number }[];
+  // other mode
+  recommended_changes?: string[];
+  action_items?: { id: string; title: string; description: string; estimate_hours: number }[];
 }
+
+const normalizeTask = (t: unknown, i: number) => {
+  if (typeof t === "string") return { id: String(i), title: t, description: "", estimate_hours: 0 };
+  if (typeof t === "object" && t !== null) {
+    const task = t as Record<string, unknown>;
+    return {
+      id: String(task.id ?? i),
+      title: String(task.title ?? task.name ?? "Task"),
+      description: String(task.description ?? task.details ?? ""),
+      estimate_hours: Number(task.estimate_hours ?? task.hours ?? task.time ?? 0),
+    };
+  }
+  return { id: String(i), title: "Task", description: "", estimate_hours: 0 };
+};
 
 const callClaude = async (systemPrompt: string, userMessage: string) => {
   const res = await fetch("/api/analyze", {
@@ -80,7 +116,6 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
   const cleaned = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(cleaned);
 
-  // normalize all array fields
   const toArray = (val: unknown) => {
     if (!val) return [];
     if (Array.isArray(val)) return val;
@@ -89,27 +124,54 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
 
   parsed.success_metrics = toArray(parsed.success_metrics);
   parsed.user_stories = toArray(parsed.user_stories);
-  parsed.recommended_changes = toArray(parsed.recommended_changes ?? parsed.ui_changes);
-  parsed.action_items = toArray(parsed.action_items ?? parsed.dev_tasks).map((t: unknown, i: number) => {
-    if (typeof t === "string") return { id: String(i), title: t, description: "", estimate_hours: 0 };
-    if (typeof t === "object" && t !== null) {
-      const task = t as Record<string, unknown>;
-      return {
-        id: String(task.id ?? i),
-        title: String(task.title ?? task.name ?? "Task"),
-        description: String(task.description ?? task.details ?? ""),
-        estimate_hours: Number(task.estimate_hours ?? task.hours ?? task.time ?? 0),
-      };
-    }
-    return { id: String(i), title: "Task", description: "", estimate_hours: 0 };
-  });
+  parsed.ui_changes = toArray(parsed.ui_changes);
+  parsed.data_model_changes = toArray(parsed.data_model_changes);
+  parsed.dev_tasks = toArray(parsed.dev_tasks).map(normalizeTask);
+  parsed.recommended_changes = toArray(parsed.recommended_changes);
+  parsed.action_items = toArray(parsed.action_items).map(normalizeTask);
 
   return parsed;
 };
 
-const downloadPDF = (spec: Spec) => {
+const downloadPDF = (spec: Spec, mode: "software" | "other") => {
   const printWindow = window.open("", "_blank");
   if (!printWindow) return;
+
+  const bottomSections = mode === "software" ? `
+    <div class="two-col">
+      <div class="section">
+        <div class="section-label">UI Changes</div>
+        ${spec.ui_changes?.map(u => `<div class="item"><span class="bullet">—</span><span>${u}</span></div>`).join("") ?? ""}
+      </div>
+      <div class="section">
+        <div class="section-label">Data Model Changes</div>
+        ${spec.data_model_changes?.map(d => `<div class="item"><span class="bullet">—</span><span>${d}</span></div>`).join("") ?? ""}
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">Dev Tasks</div>
+      ${spec.dev_tasks?.map((t, i) => `
+        <div class="task">
+          <div class="task-num">${String(i + 1).padStart(2, "0")}</div>
+          <div><div class="task-title">${t.title}</div><div class="task-desc">${t.description}</div></div>
+          <div class="task-hours">~${t.estimate_hours}h</div>
+        </div>`).join("") ?? ""}
+    </div>
+  ` : `
+    <div class="section">
+      <div class="section-label">Recommended Changes</div>
+      ${spec.recommended_changes?.map(r => `<div class="item"><span class="bullet">—</span><span>${r}</span></div>`).join("") ?? ""}
+    </div>
+    <div class="section">
+      <div class="section-label">Action Items</div>
+      ${spec.action_items?.map((t, i) => `
+        <div class="task">
+          <div class="task-num">${String(i + 1).padStart(2, "0")}</div>
+          <div><div class="task-title">${t.title}</div><div class="task-desc">${t.description}</div></div>
+          <div class="task-hours">~${t.estimate_hours}h</div>
+        </div>`).join("") ?? ""}
+    </div>
+  `;
 
   printWindow.document.write(`
     <!DOCTYPE html>
@@ -146,19 +208,16 @@ const downloadPDF = (spec: Spec) => {
         <div class="logo">PM·AI</div>
         <div class="date">Generated ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>
       </div>
-
       <div style="margin-bottom: 28px;">
         <div style="font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #999; margin-bottom: 8px;">Product Spec</div>
         <div class="title">${spec.title}</div>
         ${spec.product_type ? `<div class="product-type">${spec.product_type}</div>` : ""}
       </div>
-
       <div class="section">
         <div class="section-label">Problem Statement</div>
         <p class="problem">${spec.problem_statement}</p>
         <div class="pull-quote">${spec.why_now}</div>
       </div>
-
       <div class="two-col">
         <div class="section">
           <div class="section-label">Success Metrics</div>
@@ -169,34 +228,12 @@ const downloadPDF = (spec: Spec) => {
           ${spec.user_stories?.map(s => `<div class="item"><span class="bullet">→</span><span>${s}</span></div>`).join("")}
         </div>
       </div>
-
-      <div class="section">
-        <div class="section-label">Recommended Changes</div>
-        ${spec.recommended_changes?.map(r => `<div class="item"><span class="bullet">—</span><span>${r}</span></div>`).join("")}
-      </div>
-
-      <div class="section">
-        <div class="section-label">Action Items</div>
-        ${spec.action_items?.map((t, i) => `
-          <div class="task">
-            <div class="task-num">${String(i + 1).padStart(2, "0")}</div>
-            <div>
-              <div class="task-title">${t.title}</div>
-              <div class="task-desc">${t.description}</div>
-            </div>
-            <div class="task-hours">~${t.estimate_hours}h</div>
-          </div>
-        `).join("")}
-      </div>
-
+      ${bottomSections}
       <div class="footer">
         <span>PM·AI — Cursor for Product Managers</span>
         <span>pm-ai-eight.vercel.app</span>
       </div>
-
-      <script>
-        window.onload = () => { window.print(); }
-      </script>
+      <script>window.onload = () => { window.print(); }</script>
     </body>
     </html>
   `);
@@ -212,12 +249,11 @@ function SortableCluster({ c, i, onSelect }: { c: Cluster; i: number; onSelect: 
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
-    cursor: "grab",
   };
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <div className="cluster-row" style={{ cursor: "grab" }} onClick={() => onSelect(c)}>
+      <div className="cluster-row" onClick={() => onSelect(c)}>
         <div {...listeners} onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, cursor: "grab", userSelect: "none", padding: "4px" }} title="Drag to reorder">
           <div className="cluster-num" style={{ pointerEvents: "none" }}>{String(i + 1).padStart(2, "0")}</div>
           <div style={{ color: "var(--ink3)", fontSize: 16, lineHeight: 1 }}>⠿</div>
@@ -255,9 +291,10 @@ export default function App() {
   const [spec, setSpec] = useState<Spec | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [history, setHistory] = useState<{ id: string, date: string, context: string, clusters: Cluster[] }[]>([]);
+  const [history, setHistory] = useState<{ id: string; date: string; context: string; clusters: Cluster[] }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [productContext, setProductContext] = useState("");
+  const [productMode, setProductMode] = useState<"software" | "other">("software");
 
   useEffect(() => {
     try {
@@ -283,38 +320,10 @@ export default function App() {
   };
 
   const NOTION_DEMO_CLUSTERS: Cluster[] = [
-    {
-      id: "offline-mode",
-      theme: "Offline Mode",
-      problem: "Users lose work and can't access content without an internet connection.",
-      frequency: 9, severity: 9,
-      quotes: ["I lost 2 hours of work because WiFi dropped", "Can't use Notion on the plane at all"],
-      priority_score: 8.1,
-    },
-    {
-      id: "mobile-performance",
-      theme: "Mobile Performance",
-      problem: "The mobile app is too slow and crashes on large workspaces.",
-      frequency: 9, severity: 8,
-      quotes: ["Mobile app takes 10 seconds to load a page", "Crashes every time I open a big database"],
-      priority_score: 7.2,
-    },
-    {
-      id: "realtime-collab",
-      theme: "Real-time Collaboration",
-      problem: "Live cursors and edits conflict, causing data loss in team editing sessions.",
-      frequency: 7, severity: 8,
-      quotes: ["My teammate's edits keep overwriting mine", "No way to see who's editing what in real time"],
-      priority_score: 5.6,
-    },
-    {
-      id: "search-quality",
-      theme: "Search Quality",
-      problem: "Search fails to find content inside databases and linked pages.",
-      frequency: 8, severity: 7,
-      quotes: ["Search never finds what I'm looking for", "Can't search inside tables at all"],
-      priority_score: 5.6,
-    },
+    { id: "offline-mode", theme: "Offline Mode", problem: "Users lose work and can't access content without an internet connection.", frequency: 9, severity: 9, quotes: ["I lost 2 hours of work because WiFi dropped", "Can't use Notion on the plane at all"], priority_score: 8.1 },
+    { id: "mobile-performance", theme: "Mobile Performance", problem: "The mobile app is too slow and crashes on large workspaces.", frequency: 9, severity: 8, quotes: ["Mobile app takes 10 seconds to load a page", "Crashes every time I open a big database"], priority_score: 7.2 },
+    { id: "realtime-collab", theme: "Real-time Collaboration", problem: "Live cursors and edits conflict, causing data loss in team editing sessions.", frequency: 7, severity: 8, quotes: ["My teammate's edits keep overwriting mine", "No way to see who's editing what in real time"], priority_score: 5.6 },
+    { id: "search-quality", theme: "Search Quality", problem: "Search fails to find content inside databases and linked pages.", frequency: 8, severity: 7, quotes: ["Search never finds what I'm looking for", "Can't search inside tables at all"], priority_score: 5.6 },
   ];
 
   const sampleData = `The onboarding took way too long, I nearly gave up\nCan't figure out how to invite my team members\nSearch is completely broken, can't find anything\nLove the product but the mobile app crashes constantly\nWish there was a dark mode option\nThe dashboard is too cluttered, hard to find what I need\nNotifications are overwhelming, I turn them all off\nTeam collaboration features are missing\nCan't export my data to CSV\nThe loading speed is very slow on large datasets\nI need better filtering options in the reports\nWould love Slack integration\nMobile experience is terrible compared to desktop\nInviting teammates is confusing\nSearch doesn't find recent items\nApp crashes when uploading large files\nNeed bulk actions for managing items\nThe pricing page is confusing\nOnboarding emails are too frequent\nWish I could customize my dashboard layout`;
@@ -331,12 +340,7 @@ export default function App() {
       const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `${context}Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`);
       const sorted = result.sort((a, b) => b.priority_score - a.priority_score);
       setClusters(sorted);
-      const newEntry = {
-        id: Date.now().toString(),
-        date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-        context: productContext.trim() || "No context provided",
-        clusters: sorted,
-      };
+      const newEntry = { id: Date.now().toString(), date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), context: productContext.trim() || "No context provided", clusters: sorted };
       const updated = [newEntry, ...history].slice(0, 10);
       setHistory(updated);
       localStorage.setItem("pm-ai-history", JSON.stringify(updated));
@@ -353,7 +357,8 @@ export default function App() {
     setStage("speccing");
     try {
       const context = productContext.trim() ? `Product context: ${productContext.trim()}\n\n` : "";
-      const result: Spec = await callClaude(SYSTEM_PROMPT_SPEC, `${context}Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);
+      const prompt = productMode === "software" ? SYSTEM_PROMPT_SPEC_SOFTWARE : SYSTEM_PROMPT_SPEC_OTHER;
+      const result: Spec = await callClaude(prompt, `${context}Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);
       setSpec(result);
       setStage("done");
     } catch (e: unknown) {
@@ -366,7 +371,14 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (e) => { const text = e.target?.result as string; setFeedback(text); runPipeline(text); };
     reader.readAsText(file);
-  }, []);
+  }, [productContext, productMode]);
+
+  const copyMarkdown = (spec: Spec) => {
+    const md = productMode === "software"
+      ? `# ${spec.title}\n${spec.product_type ? `**${spec.product_type}**\n` : ""}\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map(m => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map(s => `- ${s}`).join("\n")}\n\n## UI Changes\n${spec.ui_changes?.map(u => `- ${u}`).join("\n")}\n\n## Data Model Changes\n${spec.data_model_changes?.map(d => `- ${d}`).join("\n")}\n\n## Dev Tasks\n${spec.dev_tasks?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`
+      : `# ${spec.title}\n${spec.product_type ? `**${spec.product_type}**\n` : ""}\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map(m => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map(s => `- ${s}`).join("\n")}\n\n## Recommended Changes\n${spec.recommended_changes?.map(r => `- ${r}`).join("\n")}\n\n## Action Items\n${spec.action_items?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`;
+    navigator.clipboard.writeText(md);
+  };
 
   return (
     <div style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", background: "#F5F0E8", minHeight: "100vh", color: "#1a1a1a" }}>
@@ -391,6 +403,12 @@ export default function App() {
         .step-item.done { color: #27ae60; }
         .step-num { width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; }
         .main { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+        .mode-toggle { display: flex; margin-bottom: 28px; border: 1px solid var(--rule); }
+        .mode-btn { flex: 1; padding: 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; border: none; transition: all 0.2s; }
+        .mode-btn + .mode-btn { border-left: 1px solid var(--rule); }
+        .mode-btn.active { background: var(--ink); color: var(--bg); }
+        .mode-btn.inactive { background: var(--bg2); color: var(--ink3); }
+        .mode-btn.inactive:hover { color: var(--ink); background: #E8E3DA; }
         .upload-zone { border: 1px solid var(--rule); background: var(--bg2); padding: 64px 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; margin-bottom: 28px; }
         .upload-zone::before { content: ''; position: absolute; inset: 6px; border: 1px dashed var(--rule); pointer-events: none; transition: border-color 0.2s; }
         .upload-zone:hover, .upload-zone.drag { background: #E8E3DA; }
@@ -440,7 +458,7 @@ export default function App() {
       {/* Ticker */}
       <div className="ticker">
         <span className="ticker-inner">
-          &nbsp;&nbsp;&nbsp;PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; WORKS FOR ANY PRODUCT TYPE &nbsp;·&nbsp; SOFTWARE · PHYSICAL · SERVICE · E-COMMERCE &nbsp;·&nbsp; POWERED BY AI &nbsp;·&nbsp; FREE TO USE &nbsp;·&nbsp; YC SPRING 2026 RFS &nbsp;·&nbsp;
+          &nbsp;&nbsp;&nbsp;PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; TURN USER FEEDBACK INTO FEATURE SPECS &nbsp;·&nbsp; POWERED BY AI &nbsp;·&nbsp; FREE TO USE &nbsp;·&nbsp; YC SPRING 2026 RFS &nbsp;·&nbsp; BUILD WHAT USERS ACTUALLY WANT &nbsp;·&nbsp; PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp;
         </span>
       </div>
 
@@ -461,7 +479,7 @@ export default function App() {
       <div className="masthead">
         <p className="tagline">Product Intelligence Platform</p>
         <h1 className="big-title">What should<br />we build?</h1>
-        <p className="subtitle">Drop in raw user feedback from any product — app, service, or physical product. Get prioritized themes with a full spec and action plan.</p>
+        <p className="subtitle">Drop in raw user feedback. Get back prioritized themes with a full product spec and action plan — ready for your team or coding agent.</p>
       </div>
 
       {/* Step bar */}
@@ -513,6 +531,17 @@ export default function App() {
         {/* Upload */}
         {stage === "idle" && clusters.length === 0 && !showHistory && (
           <div className="fade-in">
+
+            {/* Mode Toggle */}
+            <div className="mode-toggle">
+              <button className={`mode-btn ${productMode === "software" ? "active" : "inactive"}`} onClick={() => setProductMode("software")}>
+                ⌨ Software App
+              </button>
+              <button className={`mode-btn ${productMode === "other" ? "active" : "inactive"}`} onClick={() => setProductMode("other")}>
+                ☕ Other Product
+              </button>
+            </div>
+
             {/* Demo Banner */}
             <div style={{ background: "var(--bg2)", border: "1px solid var(--rule)", borderLeft: "3px solid var(--ink)", padding: "16px 20px", marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -541,7 +570,7 @@ export default function App() {
               </p>
               <input
                 type="text"
-                placeholder="e.g. A B2B SaaS tool · A coffee shop in Dubai · A running shoe brand"
+                placeholder={productMode === "software" ? "e.g. A B2B project management SaaS for engineering teams" : "e.g. A specialty coffee shop in Dubai · A running shoe brand"}
                 value={productContext}
                 onChange={(e) => setProductContext(e.target.value)}
                 style={{ width: "100%", background: "var(--bg2)", border: "1px solid var(--rule)", borderBottom: "2px solid var(--ink)", color: "var(--ink)", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, padding: "12px 16px", outline: "none", letterSpacing: 0.5 }}
@@ -550,7 +579,11 @@ export default function App() {
 
             <div className="divider-text">or paste directly</div>
 
-            <textarea placeholder="Paste user feedback here — interview notes, app reviews, support tickets, survey responses..." value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+            <textarea
+              placeholder={productMode === "software" ? "Paste user feedback — app reviews, support tickets, interview notes..." : "Paste customer feedback — reviews, complaints, survey responses..."}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+            />
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
               <button className="btn-sample" onClick={() => setFeedback(sampleData)}>→ Load sample feedback</button>
@@ -649,7 +682,13 @@ export default function App() {
                 <p className="section-label">Analysis complete</p>
                 <h2 className="display" style={{ fontSize: 36, fontWeight: 900, letterSpacing: -1 }}>{clusters.length} themes identified</h2>
               </div>
-              <button className="btn-ghost" onClick={() => { setClusters([]); setFeedback(""); setStage("idle"); }}>← New analysis</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ display: "flex", border: "1px solid var(--rule)" }}>
+                  <button className={`mode-btn ${productMode === "software" ? "active" : "inactive"}`} style={{ padding: "8px 16px", fontSize: 10 }} onClick={() => setProductMode("software")}>⌨ Software</button>
+                  <button className={`mode-btn ${productMode === "other" ? "active" : "inactive"}`} style={{ padding: "8px 16px", fontSize: 10, borderLeft: "1px solid var(--rule)" }} onClick={() => setProductMode("other")}>☕ Other</button>
+                </div>
+                <button className="btn-ghost" onClick={() => { setClusters([]); setFeedback(""); setStage("idle"); }}>← New analysis</button>
+              </div>
             </div>
             <hr className="rule-heavy" />
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -675,11 +714,8 @@ export default function App() {
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn-ghost no-print" onClick={() => { setSpec(null); setSelectedFeature(null); }}>← Back</button>
-                <button className="btn-primary" onClick={() => {
-                  const md = `# ${spec.title}\n${spec.product_type ? `**${spec.product_type}**\n` : ""}\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map(m => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map(s => `- ${s}`).join("\n")}\n\n## Recommended Changes\n${spec.recommended_changes?.map(r => `- ${r}`).join("\n")}\n\n## Action Items\n${spec.action_items?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`;
-                  navigator.clipboard.writeText(md);
-                }}>Copy MD</button>
-                <button className="btn-ghost" onClick={() => downloadPDF(spec)}>Print / Save PDF</button>
+                <button className="btn-primary" onClick={() => copyMarkdown(spec)}>Copy MD</button>
+                <button className="btn-ghost" onClick={() => downloadPDF(spec, productMode)}>Print / Save PDF</button>
               </div>
             </div>
             <hr className="rule-heavy" />
@@ -701,26 +737,57 @@ export default function App() {
               </div>
             </div>
 
-            <div className="spec-block">
-              <div className="spec-block-label">Recommended changes</div>
-              {spec.recommended_changes?.map((r, i) => (
-                <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{r}</span></div>
-              ))}
-            </div>
-
-            <div className="spec-block">
-              <div className="spec-block-label">Action items</div>
-              {spec.action_items?.map((t, i) => (
-                <div key={i} className="task-row">
-                  <div style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1, paddingTop: 2 }}>{String(i + 1).padStart(2, "0")}</div>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, letterSpacing: -0.3 }}>{t.title}</p>
-                    <p style={{ fontSize: 12, color: "var(--ink2)", lineHeight: 1.6 }}>{t.description}</p>
+            {/* Software mode */}
+            {productMode === "software" && (
+              <>
+                <div className="two-col">
+                  <div className="spec-block">
+                    <div className="spec-block-label">UI changes</div>
+                    {spec.ui_changes?.map((u, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{u}</span></div>)}
                   </div>
-                  <div style={{ fontSize: 10, letterSpacing: 1, color: "var(--ink3)", whiteSpace: "nowrap", paddingTop: 2 }}>~{t.estimate_hours}h</div>
+                  <div className="spec-block">
+                    <div className="spec-block-label">Data model changes</div>
+                    {spec.data_model_changes?.map((d, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{d}</span></div>)}
+                  </div>
                 </div>
-              ))}
-            </div>
+                <div className="spec-block">
+                  <div className="spec-block-label">Dev tasks — paste into Cursor or Claude Code</div>
+                  {spec.dev_tasks?.map((t, i) => (
+                    <div key={i} className="task-row">
+                      <div style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1, paddingTop: 2 }}>{String(i + 1).padStart(2, "0")}</div>
+                      <div>
+                        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, letterSpacing: -0.3 }}>{t.title}</p>
+                        <p style={{ fontSize: 12, color: "var(--ink2)", lineHeight: 1.6 }}>{t.description}</p>
+                      </div>
+                      <div style={{ fontSize: 10, letterSpacing: 1, color: "var(--ink3)", whiteSpace: "nowrap", paddingTop: 2 }}>~{t.estimate_hours}h</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Other product mode */}
+            {productMode === "other" && (
+              <>
+                <div className="spec-block">
+                  <div className="spec-block-label">Recommended changes</div>
+                  {spec.recommended_changes?.map((r, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{r}</span></div>)}
+                </div>
+                <div className="spec-block">
+                  <div className="spec-block-label">Action items</div>
+                  {spec.action_items?.map((t, i) => (
+                    <div key={i} className="task-row">
+                      <div style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1, paddingTop: 2 }}>{String(i + 1).padStart(2, "0")}</div>
+                      <div>
+                        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, letterSpacing: -0.3 }}>{t.title}</p>
+                        <p style={{ fontSize: 12, color: "var(--ink2)", lineHeight: 1.6 }}>{t.description}</p>
+                      </div>
+                      <div style={{ fontSize: 10, letterSpacing: 1, color: "var(--ink3)", whiteSpace: "nowrap", paddingTop: 2 }}>~{t.estimate_hours}h</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
