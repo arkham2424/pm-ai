@@ -232,6 +232,46 @@ export default function App() {
     reader.readAsText(file);
   }, []);
 
+  
+  const NOTION_DEMO_CLUSTERS: Cluster[] = [
+    {
+      id: "offline-mode",
+      theme: "Offline Mode",
+      problem: "Users lose work and can't access content without an internet connection.",
+      frequency: 9,
+      severity: 9,
+      quotes: ["I lost 2 hours of work because WiFi dropped", "Can't use Notion on the plane at all"],
+      priority_score: 8.1,
+    },
+    {
+      id: "mobile-performance",
+      theme: "Mobile Performance",
+      problem: "The mobile app is too slow and crashes on large workspaces.",
+      frequency: 9,
+      severity: 8,
+      quotes: ["Mobile app takes 10 seconds to load a page", "Crashes every time I open a big database"],
+      priority_score: 7.2,
+    },
+    {
+      id: "realtime-collab",
+      theme: "Real-time Collaboration",
+      problem: "Live cursors and edits conflict, causing data loss in team editing sessions.",
+      frequency: 7,
+      severity: 8,
+      quotes: ["My teammate's edits keep overwriting mine", "No way to see who's editing what in real time"],
+      priority_score: 5.6,
+    },
+    {
+      id: "search-quality",
+      theme: "Search Quality",
+      problem: "Search fails to find content inside databases and linked pages.",
+      frequency: 8,
+      severity: 7,
+      quotes: ["Search never finds what I'm looking for", "Can't search inside tables at all"],
+      priority_score: 5.6,
+    },
+  ];
+
   const sampleData = `The onboarding took way too long, I nearly gave up\nCan't figure out how to invite my team members\nSearch is completely broken, can't find anything\nLove the product but the mobile app crashes constantly\nWish there was a dark mode option\nThe dashboard is too cluttered, hard to find what I need\nNotifications are overwhelming, I turn them all off\nTeam collaboration features are missing\nCan't export my data to CSV\nThe loading speed is very slow on large datasets\nI need better filtering options in the reports\nWould love Slack integration\nMobile experience is terrible compared to desktop\nInviting teammates is confusing\nSearch doesn't find recent items\nApp crashes when uploading large files\nNeed bulk actions for managing items\nThe pricing page is confusing\nOnboarding emails are too frequent\nWish I could customize my dashboard layout`;
 
   return (
@@ -402,6 +442,21 @@ export default function App() {
         {/* Upload */}
         {stage === "idle" && clusters.length === 0 && (
           <div className="fade-in">
+            
+            {/* Demo Banner */}
+            <div style={{ background: "var(--bg2)", border: "1px solid var(--rule)", borderLeft: "3px solid var(--ink)", padding: "16px 20px", marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <p style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "var(--ink3)", marginBottom: 4 }}>Live demo</p>
+                <p style={{ fontSize: 13, color: "var(--ink2)" }}>See real output using Notion app store reviews as sample data</p>
+              </div>
+              <button className="btn-primary" onClick={() => {
+                setClusters(NOTION_DEMO_CLUSTERS);
+                setStage("done");
+              }}>
+                View Demo →
+              </button>
+            </div>
+
             <div className={`upload-zone${dragOver ? " drag" : ""}`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
