@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useState, useCallback, useEffect } from "react";
+
 const SYSTEM_PROMPT_ANALYZE = `You are a senior product manager AI. You will receive user feedback.
 
 Return a JSON array of 4-6 objects with:
@@ -30,17 +31,21 @@ Return a JSON array of 4-6 objects with:
 
 Return ONLY valid JSON array, no markdown, no explanation.`;
 
-const SYSTEM_PROMPT_SPEC = `You are a senior product manager and tech lead.
+const SYSTEM_PROMPT_SPEC = `You are a senior product manager and strategist.
+
+You will receive a theme, problem, and optional product context.
+
+Based on the product context, decide what kind of product this is (software app, physical product, service, etc.) and adapt the spec accordingly.
 
 Return a JSON object with:
 - title: string
+- product_type: string (e.g. "SaaS app", "Mobile app", "Physical product", "Service", "E-commerce")
 - problem_statement: string
 - why_now: string
 - success_metrics: string[]
 - user_stories: string[]
-- ui_changes: string[]
-- data_model_changes: string[]
-- dev_tasks: {id: string, title: string, description: string, estimate_hours: number}[]
+- recommended_changes: string[] (generic improvements suited to this product type — NOT always UI/data model)
+- action_items: {id: string, title: string, description: string, estimate_hours: number}[] (concrete next steps, adjust effort unit if not software e.g. days for physical products)
 
 Return ONLY valid JSON, no markdown.`;
 
@@ -54,22 +59,15 @@ interface Cluster {
   priority_score: number;
 }
 
-interface DevTask {
-  id: string;
-  title: string;
-  description: string;
-  estimate_hours: number;
-}
-
 interface Spec {
   title: string;
+  product_type: string;
   problem_statement: string;
   why_now: string;
   success_metrics: string[];
   user_stories: string[];
-  ui_changes: string[];
-  data_model_changes: string[];
-  dev_tasks: DevTask[];
+  recommended_changes: string[];
+  action_items: { id: string; title: string; description: string; estimate_hours: number }[];
 }
 
 const callClaude = async (systemPrompt: string, userMessage: string) => {
@@ -81,12 +79,18 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
   const { text } = await res.json();
   const cleaned = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(cleaned);
-  if (parsed.ui_changes && !Array.isArray(parsed.ui_changes)) parsed.ui_changes = Object.values(parsed.ui_changes);
-  if (parsed.data_model_changes && !Array.isArray(parsed.data_model_changes)) parsed.data_model_changes = Object.values(parsed.data_model_changes);
-  if (parsed.success_metrics && !Array.isArray(parsed.success_metrics)) parsed.success_metrics = Object.values(parsed.success_metrics);
-  if (parsed.user_stories && !Array.isArray(parsed.user_stories)) parsed.user_stories = Object.values(parsed.user_stories);
-  if (parsed.dev_tasks && !Array.isArray(parsed.dev_tasks)) parsed.dev_tasks = Object.values(parsed.dev_tasks);
-  parsed.dev_tasks = parsed.dev_tasks?.map((t: unknown, i: number) => {
+
+  // normalize all array fields
+  const toArray = (val: unknown) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    return Object.values(val as Record<string, unknown>);
+  };
+
+  parsed.success_metrics = toArray(parsed.success_metrics);
+  parsed.user_stories = toArray(parsed.user_stories);
+  parsed.recommended_changes = toArray(parsed.recommended_changes ?? parsed.ui_changes);
+  parsed.action_items = toArray(parsed.action_items ?? parsed.dev_tasks).map((t: unknown, i: number) => {
     if (typeof t === "string") return { id: String(i), title: t, description: "", estimate_hours: 0 };
     if (typeof t === "object" && t !== null) {
       const task = t as Record<string, unknown>;
@@ -99,6 +103,7 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
     }
     return { id: String(i), title: "Task", description: "", estimate_hours: 0 };
   });
+
   return parsed;
 };
 
@@ -119,6 +124,7 @@ const downloadPDF = (spec: Spec) => {
         .logo { font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 900; }
         .date { font-size: 10px; letter-spacing: 2px; color: #666; text-transform: uppercase; }
         .title { font-family: 'Playfair Display', serif; font-size: 36px; font-weight: 900; letter-spacing: -1px; margin-bottom: 8px; line-height: 1.1; }
+        .product-type { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #999; margin-bottom: 20px; }
         .section { border-top: 1px solid #ddd; padding: 20px 0; page-break-inside: avoid; }
         .section-label { font-size: 8px; letter-spacing: 4px; text-transform: uppercase; color: #999; margin-bottom: 12px; }
         .problem { font-size: 14px; line-height: 1.8; color: #2a2a2a; }
@@ -144,6 +150,7 @@ const downloadPDF = (spec: Spec) => {
       <div style="margin-bottom: 28px;">
         <div style="font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #999; margin-bottom: 8px;">Product Spec</div>
         <div class="title">${spec.title}</div>
+        ${spec.product_type ? `<div class="product-type">${spec.product_type}</div>` : ""}
       </div>
 
       <div class="section">
@@ -163,20 +170,14 @@ const downloadPDF = (spec: Spec) => {
         </div>
       </div>
 
-      <div class="two-col">
-        <div class="section">
-          <div class="section-label">UI Changes</div>
-          ${spec.ui_changes?.map(u => `<div class="item"><span class="bullet">—</span><span>${u}</span></div>`).join("")}
-        </div>
-        <div class="section">
-          <div class="section-label">Data Model Changes</div>
-          ${spec.data_model_changes?.map(d => `<div class="item"><span class="bullet">—</span><span>${d}</span></div>`).join("")}
-        </div>
+      <div class="section">
+        <div class="section-label">Recommended Changes</div>
+        ${spec.recommended_changes?.map(r => `<div class="item"><span class="bullet">—</span><span>${r}</span></div>`).join("")}
       </div>
 
       <div class="section">
-        <div class="section-label">Dev Tasks</div>
-        ${spec.dev_tasks?.map((t, i) => `
+        <div class="section-label">Action Items</div>
+        ${spec.action_items?.map((t, i) => `
           <div class="task">
             <div class="task-num">${String(i + 1).padStart(2, "0")}</div>
             <div>
@@ -202,9 +203,9 @@ const downloadPDF = (spec: Spec) => {
   printWindow.document.close();
 };
 
-
 const priorityColor = (score: number) => score >= 7 ? "#c0392b" : score >= 5 ? "#d35400" : "#27ae60";
 const priorityLabel = (score: number) => score >= 7 ? "CRITICAL" : score >= 5 ? "HIGH" : "MEDIUM";
+
 function SortableCluster({ c, i, onSelect }: { c: Cluster; i: number; onSelect: (c: Cluster) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: c.id });
   const style = {
@@ -254,7 +255,9 @@ export default function App() {
   const [spec, setSpec] = useState<Spec | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [history, setHistory] = useState<{id: string, date: string, context: string, clusters: Cluster[]}[]>([]);
+  const [history, setHistory] = useState<{ id: string, date: string, context: string, clusters: Cluster[] }[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [productContext, setProductContext] = useState("");
 
   useEffect(() => {
     try {
@@ -262,7 +265,7 @@ export default function App() {
       if (saved) setHistory(JSON.parse(saved));
     } catch { }
   }, []);
-  const [showHistory, setShowHistory] = useState(false);
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -279,7 +282,42 @@ export default function App() {
     }
   };
 
-  const [productContext, setProductContext] = useState("");
+  const NOTION_DEMO_CLUSTERS: Cluster[] = [
+    {
+      id: "offline-mode",
+      theme: "Offline Mode",
+      problem: "Users lose work and can't access content without an internet connection.",
+      frequency: 9, severity: 9,
+      quotes: ["I lost 2 hours of work because WiFi dropped", "Can't use Notion on the plane at all"],
+      priority_score: 8.1,
+    },
+    {
+      id: "mobile-performance",
+      theme: "Mobile Performance",
+      problem: "The mobile app is too slow and crashes on large workspaces.",
+      frequency: 9, severity: 8,
+      quotes: ["Mobile app takes 10 seconds to load a page", "Crashes every time I open a big database"],
+      priority_score: 7.2,
+    },
+    {
+      id: "realtime-collab",
+      theme: "Real-time Collaboration",
+      problem: "Live cursors and edits conflict, causing data loss in team editing sessions.",
+      frequency: 7, severity: 8,
+      quotes: ["My teammate's edits keep overwriting mine", "No way to see who's editing what in real time"],
+      priority_score: 5.6,
+    },
+    {
+      id: "search-quality",
+      theme: "Search Quality",
+      problem: "Search fails to find content inside databases and linked pages.",
+      frequency: 8, severity: 7,
+      quotes: ["Search never finds what I'm looking for", "Can't search inside tables at all"],
+      priority_score: 5.6,
+    },
+  ];
+
+  const sampleData = `The onboarding took way too long, I nearly gave up\nCan't figure out how to invite my team members\nSearch is completely broken, can't find anything\nLove the product but the mobile app crashes constantly\nWish there was a dark mode option\nThe dashboard is too cluttered, hard to find what I need\nNotifications are overwhelming, I turn them all off\nTeam collaboration features are missing\nCan't export my data to CSV\nThe loading speed is very slow on large datasets\nI need better filtering options in the reports\nWould love Slack integration\nMobile experience is terrible compared to desktop\nInviting teammates is confusing\nSearch doesn't find recent items\nApp crashes when uploading large files\nNeed bulk actions for managing items\nThe pricing page is confusing\nOnboarding emails are too frequent\nWish I could customize my dashboard layout`;
 
   const runPipeline = async (text: string) => {
     setError(null);
@@ -290,7 +328,7 @@ export default function App() {
       const lines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 10);
       const feedbackBlock = lines.slice(0, 60).join("\n");
       const context = productContext.trim() ? `Product context: ${productContext.trim()}\n\n` : "";
-      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `${context}Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`); 
+      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `${context}Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`);
       const sorted = result.sort((a, b) => b.priority_score - a.priority_score);
       setClusters(sorted);
       const newEntry = {
@@ -299,7 +337,7 @@ export default function App() {
         context: productContext.trim() || "No context provided",
         clusters: sorted,
       };
-      const updated = [newEntry, ...history].slice(0, 10); // keep last 10
+      const updated = [newEntry, ...history].slice(0, 10);
       setHistory(updated);
       localStorage.setItem("pm-ai-history", JSON.stringify(updated));
       setStage("done");
@@ -315,7 +353,8 @@ export default function App() {
     setStage("speccing");
     try {
       const context = productContext.trim() ? `Product context: ${productContext.trim()}\n\n` : "";
-      const result: Spec = await callClaude(SYSTEM_PROMPT_SPEC, `${context}Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);      setSpec(result);
+      const result: Spec = await callClaude(SYSTEM_PROMPT_SPEC, `${context}Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);
+      setSpec(result);
       setStage("done");
     } catch (e: unknown) {
       setError("Spec failed: " + (e instanceof Error ? e.message : String(e)));
@@ -329,56 +368,12 @@ export default function App() {
     reader.readAsText(file);
   }, []);
 
-  
-  const NOTION_DEMO_CLUSTERS: Cluster[] = [
-    {
-      id: "offline-mode",
-      theme: "Offline Mode",
-      problem: "Users lose work and can't access content without an internet connection.",
-      frequency: 9,
-      severity: 9,
-      quotes: ["I lost 2 hours of work because WiFi dropped", "Can't use Notion on the plane at all"],
-      priority_score: 8.1,
-    },
-    {
-      id: "mobile-performance",
-      theme: "Mobile Performance",
-      problem: "The mobile app is too slow and crashes on large workspaces.",
-      frequency: 9,
-      severity: 8,
-      quotes: ["Mobile app takes 10 seconds to load a page", "Crashes every time I open a big database"],
-      priority_score: 7.2,
-    },
-    {
-      id: "realtime-collab",
-      theme: "Real-time Collaboration",
-      problem: "Live cursors and edits conflict, causing data loss in team editing sessions.",
-      frequency: 7,
-      severity: 8,
-      quotes: ["My teammate's edits keep overwriting mine", "No way to see who's editing what in real time"],
-      priority_score: 5.6,
-    },
-    {
-      id: "search-quality",
-      theme: "Search Quality",
-      problem: "Search fails to find content inside databases and linked pages.",
-      frequency: 8,
-      severity: 7,
-      quotes: ["Search never finds what I'm looking for", "Can't search inside tables at all"],
-      priority_score: 5.6,
-    },
-  ];
-
-  const sampleData = `The onboarding took way too long, I nearly gave up\nCan't figure out how to invite my team members\nSearch is completely broken, can't find anything\nLove the product but the mobile app crashes constantly\nWish there was a dark mode option\nThe dashboard is too cluttered, hard to find what I need\nNotifications are overwhelming, I turn them all off\nTeam collaboration features are missing\nCan't export my data to CSV\nThe loading speed is very slow on large datasets\nI need better filtering options in the reports\nWould love Slack integration\nMobile experience is terrible compared to desktop\nInviting teammates is confusing\nSearch doesn't find recent items\nApp crashes when uploading large files\nNeed bulk actions for managing items\nThe pricing page is confusing\nOnboarding emails are too frequent\nWish I could customize my dashboard layout`;
-
   return (
     <div style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", background: "#F5F0E8", minHeight: "100vh", color: "#1a1a1a" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Playfair+Display:wght@700;900&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-          --bg: #F5F0E8; --bg2: #EDE8DF; --ink: #0a0a0a; --ink2: #2a2a2a; --ink3: #666; --rule: #C4BFB6;
-        }
+        :root { --bg: #F5F0E8; --bg2: #EDE8DF; --ink: #0a0a0a; --ink2: #2a2a2a; --ink3: #666; --rule: #C4BFB6; }
         body { background: var(--bg); }
         .display { font-family: 'Playfair Display', serif; }
         .ticker { background: var(--ink); color: var(--bg); font-size: 10px; letter-spacing: 3px; padding: 6px 0; overflow: hidden; white-space: nowrap; }
@@ -396,7 +391,7 @@ export default function App() {
         .step-item.done { color: #27ae60; }
         .step-num { width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; }
         .main { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
-        .upload-zone { border: 1px solid var(--rule); background: var(--bg2); padding: 64px 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; }
+        .upload-zone { border: 1px solid var(--rule); background: var(--bg2); padding: 64px 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; margin-bottom: 28px; }
         .upload-zone::before { content: ''; position: absolute; inset: 6px; border: 1px dashed var(--rule); pointer-events: none; transition: border-color 0.2s; }
         .upload-zone:hover, .upload-zone.drag { background: #E8E3DA; }
         .upload-zone:hover::before, .upload-zone.drag::before { border-color: var(--ink); }
@@ -413,12 +408,6 @@ export default function App() {
         .btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
         .btn-sample { background: transparent; color: var(--ink3); border: none; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 1px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; transition: color 0.2s; padding: 0; }
         .btn-sample:hover { color: var(--ink); }
-        .loading-wrap { text-align: center; padding: 100px 20px; }
-        .loading-glyph { font-family: 'Playfair Display', serif; font-size: 80px; color: var(--rule); margin-bottom: 32px; display: block; animation: breathe 2s ease-in-out infinite; }
-        @keyframes breathe { 0%,100%{opacity:0.3;transform:scale(1)} 50%{opacity:1;transform:scale(1.05)} }
-        .loading-bar { width: 200px; height: 1px; background: var(--rule); margin: 24px auto 0; position: relative; overflow: hidden; }
-        .loading-bar::after { content: ''; position: absolute; top: 0; left: 0; width: 60px; height: 100%; background: var(--ink); animation: scan 1.5s ease-in-out infinite; }
-        @keyframes scan { 0%{transform:translateX(-60px)} 100%{transform:translateX(200px)} }
         .cluster-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: start; gap: 24px; padding: 28px 0; border-bottom: 1px solid var(--rule); cursor: pointer; transition: all 0.15s; }
         .cluster-row:hover { background: var(--bg2); margin: 0 -24px; padding: 28px 24px; }
         .cluster-num { font-family: 'Playfair Display', serif; font-size: 42px; font-weight: 900; color: var(--rule); line-height: 1; text-align: right; }
@@ -436,35 +425,22 @@ export default function App() {
         .task-row { display: grid; grid-template-columns: 32px 1fr auto; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--rule); align-items: start; }
         .pull-quote { border-left: 3px solid var(--ink); padding: 12px 20px; margin: 20px 0; font-family: 'Playfair Display', serif; font-size: 16px; font-style: italic; color: var(--ink2); line-height: 1.6; }
         .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
-        .skeleton {
-          background: linear-gradient(90deg, var(--bg2) 25%, var(--rule) 50%, var(--bg2) 75%);
-          background-size: 200% 100%;
-          animation: shimmer 1.5s infinite;
-          border-radius: 2px;
-        }
+        .skeleton { background: linear-gradient(90deg, var(--bg2) 25%, var(--rule) 50%, var(--bg2) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 2px; }
         @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-        @media print {
-          .no-print { display: none !important; }
-          body { background: white !important; }
-          .nav, .ticker, .step-bar { display: none !important; }
-          .main { padding: 0 !important; max-width: 100% !important; }
-          .rule-heavy { border-top: 2px solid black !important; }
-          .spec-block { break-inside: avoid; }
-          .task-row { break-inside: avoid; }
-          .two-col { grid-template-columns: 1fr 1fr !important; }
-        }
+        @media print { .no-print{display:none !important} body{background:white !important} .nav,.ticker,.step-bar{display:none !important} .main{padding:0 !important;max-width:100% !important} .spec-block{break-inside:avoid} .task-row{break-inside:avoid} }
         .fade-in { animation: fadeIn 0.4s ease forwards; }
         @keyframes fadeIn { from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)} }
         .error-bar { background: #fef2f2; border: 1px solid #fca5a5; padding: 12px 16px; font-size: 12px; color: #991b1b; margin-top: 20px; }
-        .rule-heavy { border: none; border-top: 3px solid var(--ink); margin: 0 0 0 0; }
+        .rule-heavy { border: none; border-top: 3px solid var(--ink); margin: 0; }
         .section-label { font-size: 9px; letter-spacing: 4px; text-transform: uppercase; color: var(--ink3); margin-bottom: 4px; }
+        .product-type-badge { display: inline-block; font-size: 9px; letter-spacing: 2px; text-transform: uppercase; border: 1px solid var(--rule); padding: 3px 10px; color: var(--ink3); margin-left: 12px; vertical-align: middle; }
         @media (max-width: 640px) { .two-col{grid-template-columns:1fr} .nav{padding:16px 20px} .main{padding:32px 16px} .big-title{font-size:3rem;letter-spacing:-2px} .cluster-row{grid-template-columns:40px 1fr auto;gap:12px} }
       `}</style>
 
       {/* Ticker */}
       <div className="ticker">
         <span className="ticker-inner">
-          &nbsp;&nbsp;&nbsp;PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; TURN USER FEEDBACK INTO FEATURE SPECS &nbsp;·&nbsp; POWERED BY AI &nbsp;·&nbsp; FREE TO USE &nbsp;·&nbsp; YC SPRING 2026 RFS &nbsp;·&nbsp; BUILD WHAT USERS ACTUALLY WANT &nbsp;·&nbsp; PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; TURN USER FEEDBACK INTO FEATURE SPECS &nbsp;·&nbsp;
+          &nbsp;&nbsp;&nbsp;PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; WORKS FOR ANY PRODUCT TYPE &nbsp;·&nbsp; SOFTWARE · PHYSICAL · SERVICE · E-COMMERCE &nbsp;·&nbsp; POWERED BY AI &nbsp;·&nbsp; FREE TO USE &nbsp;·&nbsp; YC SPRING 2026 RFS &nbsp;·&nbsp;
         </span>
       </div>
 
@@ -485,7 +461,7 @@ export default function App() {
       <div className="masthead">
         <p className="tagline">Product Intelligence Platform</p>
         <h1 className="big-title">What should<br />we build?</h1>
-        <p className="subtitle">Drop in raw user feedback. Get back prioritized themes scored by frequency and severity, with a full product spec and dev task breakdown — ready for your coding agent.</p>
+        <p className="subtitle">Drop in raw user feedback from any product — app, service, or physical product. Get prioritized themes with a full spec and action plan.</p>
       </div>
 
       {/* Step bar */}
@@ -502,7 +478,7 @@ export default function App() {
       </div>
 
       <div className="main">
-        
+
         {/* History Panel */}
         {showHistory && (
           <div className="fade-in">
@@ -524,9 +500,7 @@ export default function App() {
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", maxWidth: 400, justifyContent: "flex-end" }}>
                     {entry.clusters.slice(0, 3).map((c) => (
-                      <span key={c.id} style={{ fontSize: 10, padding: "3px 10px", border: "1px solid var(--rule)", color: "var(--ink2)", letterSpacing: 1 }}>
-                        {c.theme}
-                      </span>
+                      <span key={c.id} style={{ fontSize: 10, padding: "3px 10px", border: "1px solid var(--rule)", color: "var(--ink2)", letterSpacing: 1 }}>{c.theme}</span>
                     ))}
                   </div>
                 </div>
@@ -537,19 +511,15 @@ export default function App() {
         )}
 
         {/* Upload */}
-        {stage === "idle" && clusters.length === 0 && (
+        {stage === "idle" && clusters.length === 0 && !showHistory && (
           <div className="fade-in">
-            
             {/* Demo Banner */}
             <div style={{ background: "var(--bg2)", border: "1px solid var(--rule)", borderLeft: "3px solid var(--ink)", padding: "16px 20px", marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <p style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "var(--ink3)", marginBottom: 4 }}>Live demo</p>
                 <p style={{ fontSize: 13, color: "var(--ink2)" }}>See real output using Notion app store reviews as sample data</p>
               </div>
-              <button className="btn-primary" onClick={() => {
-                setClusters(NOTION_DEMO_CLUSTERS);
-                setStage("done");
-              }}>
+              <button className="btn-primary" onClick={() => { setClusters(NOTION_DEMO_CLUSTERS); setStage("done"); }}>
                 View Demo →
               </button>
             </div>
@@ -564,28 +534,17 @@ export default function App() {
               <p style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1 }}>CSV or TXT · click to browse</p>
               <input id="file-input" type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
             </div>
-            
+
             <div style={{ marginBottom: 28 }}>
               <p style={{ fontSize: 9, letterSpacing: 4, textTransform: "uppercase", color: "var(--ink3)", marginBottom: 8 }}>
-                Product context <span style={{ color: "var(--ink3)", fontWeight: 300 }}>(optional but recommended)</span>
+                Product context <span style={{ fontWeight: 300 }}>(optional but recommended)</span>
               </p>
               <input
                 type="text"
-                placeholder="e.g. A B2B project management tool for engineering teams at startups"
+                placeholder="e.g. A B2B SaaS tool · A coffee shop in Dubai · A running shoe brand"
                 value={productContext}
                 onChange={(e) => setProductContext(e.target.value)}
-                style={{
-                  width: "100%",
-                  background: "var(--bg2)",
-                  border: "1px solid var(--rule)",
-                  borderBottom: "2px solid var(--ink)",
-                  color: "var(--ink)",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 12,
-                  padding: "12px 16px",
-                  outline: "none",
-                  letterSpacing: 0.5,
-                }}
+                style={{ width: "100%", background: "var(--bg2)", border: "1px solid var(--rule)", borderBottom: "2px solid var(--ink)", color: "var(--ink)", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, padding: "12px 16px", outline: "none", letterSpacing: 0.5 }}
               />
             </div>
 
@@ -600,7 +559,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Skeleton Loaders */}
+        {/* Skeleton — Analyzing */}
         {stage === "analyzing" && (
           <div className="fade-in">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
@@ -612,18 +571,14 @@ export default function App() {
             <hr className="rule-heavy" />
             {[1, 2, 3, 4].map((i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "64px 1fr auto", gap: 24, padding: "28px 0", borderBottom: "1px solid var(--rule)" }}>
-                <div className="skeleton" style={{ width: 42, height: 42, alignSelf: "flex-start" }} />
+                <div className="skeleton" style={{ width: 42, height: 42 }} />
                 <div>
                   <div className="skeleton" style={{ width: "40%", height: 18, marginBottom: 10 }} />
                   <div className="skeleton" style={{ width: "80%", height: 13, marginBottom: 6 }} />
                   <div className="skeleton" style={{ width: "60%", height: 13, marginBottom: 16 }} />
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
-                    <div>
-                      <div className="skeleton" style={{ width: "100%", height: 2 }} />
-                    </div>
-                    <div>
-                      <div className="skeleton" style={{ width: "100%", height: 2 }} />
-                    </div>
+                    <div className="skeleton" style={{ height: 2 }} />
+                    <div className="skeleton" style={{ height: 2 }} />
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <div className="skeleton" style={{ width: 120, height: 28 }} />
@@ -639,6 +594,7 @@ export default function App() {
           </div>
         )}
 
+        {/* Skeleton — Speccing */}
         {stage === "speccing" && (
           <div className="fade-in">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
@@ -652,7 +608,7 @@ export default function App() {
               </div>
             </div>
             <hr className="rule-heavy" />
-            <div style={{ padding: "28px 0", borderTop: "1px solid var(--rule)" }}>
+            <div style={{ padding: "28px 0" }}>
               <div className="skeleton" style={{ width: 140, height: 10, marginBottom: 16 }} />
               <div className="skeleton" style={{ width: "90%", height: 14, marginBottom: 8 }} />
               <div className="skeleton" style={{ width: "75%", height: 14, marginBottom: 8 }} />
@@ -661,7 +617,7 @@ export default function App() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
               {[1, 2].map((i) => (
-                <div key={i} style={{ padding: "28px 0", borderTop: "1px solid var(--rule)" }}>
+                <div key={i} style={{ padding: "28px 0" }}>
                   <div className="skeleton" style={{ width: 120, height: 10, marginBottom: 16 }} />
                   {[1, 2, 3].map((j) => (
                     <div key={j} style={{ display: "flex", gap: 16, marginBottom: 12 }}>
@@ -711,18 +667,19 @@ export default function App() {
           <div className="fade-in">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
               <div>
-                <p className="section-label">Product spec</p>
+                <p className="section-label">
+                  Product spec
+                  {spec.product_type && <span className="product-type-badge">{spec.product_type}</span>}
+                </p>
                 <h2 className="display" style={{ fontSize: 32, fontWeight: 900, letterSpacing: -1, maxWidth: 600 }}>{spec.title}</h2>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn-ghost no-print" onClick={() => { setSpec(null); setSelectedFeature(null); }}>← Back</button>
                 <button className="btn-primary" onClick={() => {
-                  const md = `# ${spec.title}\n\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map(m => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map(s => `- ${s}`).join("\n")}\n\n## UI Changes\n${spec.ui_changes?.map(u => `- ${u}`).join("\n")}\n\n## Data Model\n${spec.data_model_changes?.map(d => `- ${d}`).join("\n")}\n\n## Dev Tasks\n${spec.dev_tasks?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`;
+                  const md = `# ${spec.title}\n${spec.product_type ? `**${spec.product_type}**\n` : ""}\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map(m => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map(s => `- ${s}`).join("\n")}\n\n## Recommended Changes\n${spec.recommended_changes?.map(r => `- ${r}`).join("\n")}\n\n## Action Items\n${spec.action_items?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`;
                   navigator.clipboard.writeText(md);
                 }}>Copy MD</button>
-                <button className="btn-ghost" onClick={() => downloadPDF(spec)}>
-                  Print / Save PDF
-                </button>
+                <button className="btn-ghost" onClick={() => downloadPDF(spec)}>Print / Save PDF</button>
               </div>
             </div>
             <hr className="rule-heavy" />
@@ -744,20 +701,16 @@ export default function App() {
               </div>
             </div>
 
-            <div className="two-col">
-              <div className="spec-block">
-                <div className="spec-block-label">UI changes</div>
-                {spec.ui_changes?.map((u, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{u}</span></div>)}
-              </div>
-              <div className="spec-block">
-                <div className="spec-block-label">Data model changes</div>
-                {spec.data_model_changes?.map((d, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{d}</span></div>)}
-              </div>
+            <div className="spec-block">
+              <div className="spec-block-label">Recommended changes</div>
+              {spec.recommended_changes?.map((r, i) => (
+                <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{r}</span></div>
+              ))}
             </div>
 
             <div className="spec-block">
-              <div className="spec-block-label">Dev tasks — paste into Cursor or Claude Code</div>
-              {spec.dev_tasks?.map((t, i) => (
+              <div className="spec-block-label">Action items</div>
+              {spec.action_items?.map((t, i) => (
                 <div key={i} className="task-row">
                   <div style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1, paddingTop: 2 }}>{String(i + 1).padStart(2, "0")}</div>
                   <div>
