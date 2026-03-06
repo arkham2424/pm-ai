@@ -64,20 +64,18 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
     body: JSON.stringify({ systemPrompt, userMessage }),
   });
   const { text } = await res.json();
-  return JSON.parse(text.replace(/```json|```/g, "").trim());
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  if (parsed.ui_changes && !Array.isArray(parsed.ui_changes)) parsed.ui_changes = Object.values(parsed.ui_changes);
+  if (parsed.data_model_changes && !Array.isArray(parsed.data_model_changes)) parsed.data_model_changes = Object.values(parsed.data_model_changes);
+  if (parsed.success_metrics && !Array.isArray(parsed.success_metrics)) parsed.success_metrics = Object.values(parsed.success_metrics);
+  if (parsed.user_stories && !Array.isArray(parsed.user_stories)) parsed.user_stories = Object.values(parsed.user_stories);
+  if (parsed.dev_tasks && !Array.isArray(parsed.dev_tasks)) parsed.dev_tasks = Object.values(parsed.dev_tasks);
+  return parsed;
 };
 
-const priorityColor = (score: number) => {
-  if (score >= 7) return "#ef4444";
-  if (score >= 5) return "#f97316";
-  return "#22c55e";
-};
-
-const priorityLabel = (score: number) => {
-  if (score >= 7) return "Critical";
-  if (score >= 5) return "High";
-  return "Medium";
-};
+const priorityColor = (score: number) => score >= 7 ? "#c0392b" : score >= 5 ? "#d35400" : "#27ae60";
+const priorityLabel = (score: number) => score >= 7 ? "CRITICAL" : score >= 5 ? "HIGH" : "MEDIUM";
 
 export default function App() {
   const [stage, setStage] = useState("idle");
@@ -96,12 +94,8 @@ export default function App() {
       setStage("analyzing");
       const lines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 10);
       const feedbackBlock = lines.slice(0, 60).join("\n");
-      const result: Cluster[] = await callClaude(
-        SYSTEM_PROMPT_ANALYZE,
-        `Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`
-      );
-      const sorted = result.sort((a, b) => b.priority_score - a.priority_score);
-      setClusters(sorted);
+      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`);
+      setClusters(result.sort((a, b) => b.priority_score - a.priority_score));
       setStage("done");
     } catch (e: unknown) {
       setError("Analysis failed: " + (e instanceof Error ? e.message : String(e)));
@@ -114,10 +108,7 @@ export default function App() {
     setSpec(null);
     setStage("speccing");
     try {
-      const result: Spec = await callClaude(
-        SYSTEM_PROMPT_SPEC,
-        `Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`
-      );
+      const result: Spec = await callClaude(SYSTEM_PROMPT_SPEC, `Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);
       setSpec(result);
       setStage("done");
     } catch (e: unknown) {
@@ -128,284 +119,267 @@ export default function App() {
 
   const handleFile = useCallback((file: File) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      setFeedback(text);
-      runPipeline(text);
-    };
+    reader.onload = (e) => { const text = e.target?.result as string; setFeedback(text); runPipeline(text); };
     reader.readAsText(file);
   }, []);
 
-  const sampleData = `The onboarding took way too long, I nearly gave up
-Can't figure out how to invite my team members
-Search is completely broken, can't find anything
-Love the product but the mobile app crashes constantly
-Wish there was a dark mode option
-The dashboard is too cluttered, hard to find what I need
-Notifications are overwhelming, I turn them all off
-Team collaboration features are missing
-Can't export my data to CSV
-The loading speed is very slow on large datasets
-I need better filtering options in the reports
-Would love Slack integration
-Mobile experience is terrible compared to desktop
-Inviting teammates is confusing
-Search doesn't find recent items
-App crashes when uploading large files
-Need bulk actions for managing items
-The pricing page is confusing
-Onboarding emails are too frequent
-Wish I could customize my dashboard layout`;
+  const sampleData = `The onboarding took way too long, I nearly gave up\nCan't figure out how to invite my team members\nSearch is completely broken, can't find anything\nLove the product but the mobile app crashes constantly\nWish there was a dark mode option\nThe dashboard is too cluttered, hard to find what I need\nNotifications are overwhelming, I turn them all off\nTeam collaboration features are missing\nCan't export my data to CSV\nThe loading speed is very slow on large datasets\nI need better filtering options in the reports\nWould love Slack integration\nMobile experience is terrible compared to desktop\nInviting teammates is confusing\nSearch doesn't find recent items\nApp crashes when uploading large files\nNeed bulk actions for managing items\nThe pricing page is confusing\nOnboarding emails are too frequent\nWish I could customize my dashboard layout`;
 
   return (
-    <div style={{ fontFamily: "'DM Mono', monospace", background: "#0a0a0f", minHeight: "100vh", color: "#e2e8f0" }}>
+    <div style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace", background: "#F5F0E8", minHeight: "100vh", color: "#1a1a1a" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        .card { background: #111118; border: 1px solid #1e1e2e; border-radius: 12px; padding: 20px; transition: all 0.2s; cursor: pointer; position: relative; overflow: hidden; }
-        .card:hover { border-color: #4f46e5; transform: translateY(-2px); }
-        .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg,#4f46e5,#7c3aed); opacity: 0; transition: opacity 0.2s; }
-        .card:hover::before, .card.selected::before { opacity: 1; }
-        .card.selected { border-color: #4f46e5; background: #13131f; }
-        .btn { background: #4f46e5; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 13px; transition: all 0.2s; }
-        .btn:hover { background: #4338ca; transform: translateY(-1px); }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .btn-ghost { background: transparent; border: 1px solid #2a2a3e; color: #94a3b8; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 12px; transition: all 0.2s; }
-        .btn-ghost:hover { border-color: #4f46e5; color: #e2e8f0; }
-        .drop-zone { border: 2px dashed #2a2a3e; border-radius: 16px; padding: 60px 40px; text-align: center; transition: all 0.2s; cursor: pointer; background: #0d0d16; }
-        .drop-zone:hover, .drop-zone.drag-over { border-color: #4f46e5; background: #111120; }
-        .spec-section { background: #0d0d16; border: 1px solid #1e1e2e; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-        .spec-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #4f46e5; margin-bottom: 10px; font-weight: 500; }
-        .task-item { background: #111118; border: 1px solid #1e1e2e; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 12px; }
-        .pulse { animation: pulse 1.5s ease-in-out infinite; }
-        @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Playfair+Display:wght@700;900&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+          --bg: #F5F0E8; --bg2: #EDE8DF; --ink: #1a1a1a; --ink2: #555; --ink3: #999; --rule: #D4CFC6;
+        }
+        body { background: var(--bg); }
+        .display { font-family: 'Playfair Display', serif; }
+        .ticker { background: var(--ink); color: var(--bg); font-size: 10px; letter-spacing: 3px; padding: 6px 0; overflow: hidden; white-space: nowrap; }
+        .ticker-inner { display: inline-block; animation: ticker 25s linear infinite; }
+        @keyframes ticker { from{transform:translateX(100vw)} to{transform:translateX(-100%)} }
+        .nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 20px 48px; border-bottom: 3px solid var(--ink); }
+        .masthead { text-align: center; padding: 48px 48px 32px; border-bottom: 1px solid var(--rule); }
+        .tagline { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--ink2); margin-bottom: 16px; }
+        .big-title { font-family: 'Playfair Display', serif; font-size: clamp(3.5rem, 9vw, 7rem); font-weight: 900; line-height: 0.9; letter-spacing: -3px; color: var(--ink); margin-bottom: 20px; }
+        .subtitle { font-size: 12px; letter-spacing: 0.5px; color: var(--ink2); max-width: 480px; margin: 0 auto; line-height: 1.8; }
+        .step-bar { display: flex; border-bottom: 1px solid var(--rule); background: var(--bg2); }
+        .step-item { flex: 1; padding: 12px 24px; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink3); border-right: 1px solid var(--rule); display: flex; align-items: center; gap: 10px; transition: color 0.3s; }
+        .step-item:last-child { border-right: none; }
+        .step-item.active { color: var(--ink); background: var(--bg); }
+        .step-item.done { color: #27ae60; }
+        .step-num { width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; }
+        .main { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+        .upload-zone { border: 1px solid var(--rule); background: var(--bg2); padding: 64px 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; }
+        .upload-zone::before { content: ''; position: absolute; inset: 6px; border: 1px dashed var(--rule); pointer-events: none; transition: border-color 0.2s; }
+        .upload-zone:hover, .upload-zone.drag { background: #E8E3DA; }
+        .upload-zone:hover::before, .upload-zone.drag::before { border-color: var(--ink); }
+        .upload-icon { font-family: 'Playfair Display', serif; font-size: 64px; line-height: 1; color: var(--rule); margin-bottom: 16px; display: block; }
+        .divider-text { display: flex; align-items: center; gap: 16px; margin: 28px 0; font-size: 10px; letter-spacing: 3px; color: var(--ink3); text-transform: uppercase; }
+        .divider-text::before, .divider-text::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+        textarea { width: 100%; background: var(--bg2); border: 1px solid var(--rule); color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 16px; resize: vertical; outline: none; min-height: 140px; line-height: 1.7; transition: border-color 0.2s; }
+        textarea:focus { border-color: var(--ink); }
+        textarea::placeholder { color: var(--ink3); }
+        .btn-primary { background: var(--ink); color: var(--bg); border: none; padding: 14px 32px; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; }
+        .btn-primary:hover { background: #333; }
+        .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-ghost { background: transparent; color: var(--ink2); border: 1px solid var(--rule); padding: 10px 24px; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; transition: all 0.2s; }
+        .btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
+        .btn-sample { background: transparent; color: var(--ink3); border: none; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 1px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; transition: color 0.2s; padding: 0; }
+        .btn-sample:hover { color: var(--ink); }
+        .loading-wrap { text-align: center; padding: 100px 20px; }
+        .loading-glyph { font-family: 'Playfair Display', serif; font-size: 80px; color: var(--rule); margin-bottom: 32px; display: block; animation: breathe 2s ease-in-out infinite; }
+        @keyframes breathe { 0%,100%{opacity:0.3;transform:scale(1)} 50%{opacity:1;transform:scale(1.05)} }
+        .loading-bar { width: 200px; height: 1px; background: var(--rule); margin: 24px auto 0; position: relative; overflow: hidden; }
+        .loading-bar::after { content: ''; position: absolute; top: 0; left: 0; width: 60px; height: 100%; background: var(--ink); animation: scan 1.5s ease-in-out infinite; }
+        @keyframes scan { 0%{transform:translateX(-60px)} 100%{transform:translateX(200px)} }
+        .cluster-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: start; gap: 24px; padding: 28px 0; border-bottom: 1px solid var(--rule); cursor: pointer; transition: all 0.15s; }
+        .cluster-row:hover { background: var(--bg2); margin: 0 -24px; padding: 28px 24px; }
+        .cluster-num { font-family: 'Playfair Display', serif; font-size: 42px; font-weight: 900; color: var(--rule); line-height: 1; text-align: right; }
+        .cluster-score { font-family: 'Playfair Display', serif; font-size: 52px; font-weight: 900; line-height: 1; text-align: right; }
+        .priority-tag { display: inline-block; font-size: 9px; letter-spacing: 2px; padding: 3px 8px; border: 1px solid currentColor; text-transform: uppercase; margin-top: 6px; }
+        .quote-chip { display: inline-block; font-size: 11px; color: var(--ink2); padding: 6px 12px; background: var(--bg); border: 1px solid var(--rule); margin: 4px 4px 0 0; font-style: italic; line-height: 1.5; }
+        .bar-label { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink3); margin-bottom: 5px; display: flex; justify-content: space-between; }
+        .bar-track { height: 2px; background: var(--rule); }
+        .bar-fill { height: 100%; background: var(--ink); transition: width 1s ease; }
+        .spec-block { border-top: 1px solid var(--rule); padding: 28px 0; }
+        .spec-block-label { font-size: 9px; letter-spacing: 4px; text-transform: uppercase; color: var(--ink3); margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+        .spec-block-label::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+        .spec-item { display: flex; gap: 16px; margin-bottom: 12px; font-size: 13px; line-height: 1.7; color: var(--ink2); }
+        .spec-bullet { color: var(--ink3); flex-shrink: 0; margin-top: 2px; }
+        .task-row { display: grid; grid-template-columns: 32px 1fr auto; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--rule); align-items: start; }
+        .pull-quote { border-left: 3px solid var(--ink); padding: 12px 20px; margin: 20px 0; font-family: 'Playfair Display', serif; font-size: 16px; font-style: italic; color: var(--ink2); line-height: 1.6; }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
         .fade-in { animation: fadeIn 0.4s ease forwards; }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)} }
-        .bar-bg { background: #1e1e2e; border-radius: 4px; height: 4px; overflow: hidden; }
-        .bar-fill { height: 100%; border-radius: 4px; }
-        textarea { width: 100%; background: #0d0d16; border: 1px solid #1e1e2e; border-radius: 8px; color: #e2e8f0; font-family: inherit; font-size: 13px; padding: 12px; resize: vertical; outline: none; min-height: 120px; transition: border-color 0.2s; }
-        textarea:focus { border-color: #4f46e5; }
-        @keyframes slide { from{transform:translateX(-100%)}to{transform:translateX(300%)} }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)} }
+        .error-bar { background: #fef2f2; border: 1px solid #fca5a5; padding: 12px 16px; font-size: 12px; color: #991b1b; margin-top: 20px; }
+        .rule-heavy { border: none; border-top: 3px solid var(--ink); margin: 0 0 0 0; }
+        .section-label { font-size: 9px; letter-spacing: 4px; text-transform: uppercase; color: var(--ink3); margin-bottom: 4px; }
+        @media (max-width: 640px) { .two-col{grid-template-columns:1fr} .nav{padding:16px 20px} .main{padding:32px 16px} .big-title{font-size:3rem;letter-spacing:-2px} .cluster-row{grid-template-columns:40px 1fr auto;gap:12px} }
       `}</style>
 
-      {/* Header */}
-      <div style={{ borderBottom: "1px solid #1e1e2e", padding: "20px 40px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: "clamp(1.8rem,4vw,3rem)", letterSpacing: "-2px", background: "linear-gradient(135deg,#fff,#94a3b8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>PM·AI</h1>
-          <p style={{ color: "#64748b", fontSize: "11px", letterSpacing: "2px", marginTop: "4px" }}>CURSOR FOR PRODUCT MANAGERS</p>
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: "999px", fontSize: "11px", letterSpacing: "1px", textTransform: "uppercase", border: "1px solid #22c55e33", background: "#22c55e11", color: "#22c55e" }}>● FREE TIER</span>
-          {stage !== "idle" && stage !== "done" && (
-            <span className="pulse" style={{ display: "inline-block", padding: "2px 10px", borderRadius: "999px", fontSize: "11px", letterSpacing: "1px", textTransform: "uppercase", border: "1px solid #f9731622", background: "#f9731611", color: "#f97316" }}>
-              ◌ {stage.toUpperCase()}
-            </span>
-          )}
-        </div>
+      {/* Ticker */}
+      <div className="ticker">
+        <span className="ticker-inner">
+          &nbsp;&nbsp;&nbsp;PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; TURN USER FEEDBACK INTO FEATURE SPECS &nbsp;·&nbsp; POWERED BY AI &nbsp;·&nbsp; FREE TO USE &nbsp;·&nbsp; YC SPRING 2026 RFS &nbsp;·&nbsp; BUILD WHAT USERS ACTUALLY WANT &nbsp;·&nbsp; PM·AI — CURSOR FOR PRODUCT MANAGERS &nbsp;·&nbsp; TURN USER FEEDBACK INTO FEATURE SPECS &nbsp;·&nbsp;
+        </span>
       </div>
 
-      <div style={{ maxWidth: "1000px", margin: "0 auto", padding: "40px 24px" }}>
-
-        {/* Steps */}
-        <div style={{ display: "flex", marginBottom: "40px" }}>
-          {["Upload Feedback", "AI Analysis", "Generate Spec"].map((label, i) => {
-            const done = (i === 0 && clusters.length > 0) || (i === 1 && clusters.length > 0) || (i === 2 && !!spec);
-            const active = (i === 1 && stage === "analyzing") || (i === 2 && stage === "speccing");
-            return (
-              <div key={i} style={{ flex: 1, display: "flex", alignItems: "center" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: done ? "#4f46e5" : active ? "#7c3aed" : "#1e1e2e", border: active ? "2px solid #7c3aed" : "1px solid #2a2a3e", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: done || active ? "white" : "#475569", transition: "all 0.3s" }}>
-                    {done ? "✓" : i + 1}
-                  </div>
-                  <span style={{ fontSize: 11, color: done ? "#94a3b8" : "#475569", marginTop: 6, letterSpacing: "0.5px" }}>{label}</span>
-                </div>
-                {i < 2 && <div style={{ height: 1, flex: 0.5, background: "#1e1e2e", marginBottom: 18 }} />}
-              </div>
-            );
-          })}
+      {/* Nav */}
+      <nav className="nav">
+        <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "var(--ink3)" }}>YC RFS · Spring 2026</div>
+        <div style={{ textAlign: "center" }}>
+          <div className="display" style={{ fontSize: 28, fontWeight: 900, letterSpacing: -1 }}>PM·AI</div>
         </div>
+        <div style={{ textAlign: "right", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "var(--ink3)" }}>Free · Open Source</div>
+      </nav>
+
+      {/* Masthead */}
+      <div className="masthead">
+        <p className="tagline">Product Intelligence Platform</p>
+        <h1 className="big-title">What should<br />we build?</h1>
+        <p className="subtitle">Drop in raw user feedback. Get back prioritized themes scored by frequency and severity, with a full product spec and dev task breakdown — ready for your coding agent.</p>
+      </div>
+
+      {/* Step bar */}
+      <div className="step-bar">
+        {[{ label: "Upload Feedback", n: "01" }, { label: "AI Analysis", n: "02" }, { label: "Generate Spec", n: "03" }].map(({ label, n }, i) => {
+          const done = (i === 0 && clusters.length > 0) || (i === 1 && clusters.length > 0) || (i === 2 && !!spec);
+          const active = (i === 1 && stage === "analyzing") || (i === 2 && stage === "speccing") || (i === 0 && stage === "idle" && clusters.length === 0);
+          return (
+            <div key={i} className={`step-item${done ? " done" : active ? " active" : ""}`}>
+              <div className="step-num">{done ? "✓" : n}</div>{label}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="main">
 
         {/* Upload */}
         {stage === "idle" && clusters.length === 0 && (
           <div className="fade-in">
-            <div
-              className={`drop-zone${dragOver ? " drag-over" : ""}`}
+            <div className={`upload-zone${dragOver ? " drag" : ""}`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-              onClick={() => document.getElementById("file-input")?.click()}
-            >
-              <div style={{ fontSize: 36, marginBottom: 16 }}>⬆</div>
-              <p style={{ color: "#94a3b8", fontSize: 14, marginBottom: 8 }}>Drop your feedback CSV or TXT file here</p>
-              <p style={{ color: "#475569", fontSize: 12 }}>or click to browse</p>
+              onClick={() => document.getElementById("file-input")?.click()}>
+              <span className="upload-icon">↑</span>
+              <p style={{ fontSize: 13, color: "var(--ink2)", marginBottom: 6 }}>Drop your feedback file here</p>
+              <p style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1 }}>CSV or TXT · click to browse</p>
               <input id="file-input" type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
             </div>
 
-            <div style={{ textAlign: "center", margin: "20px 0", color: "#334155", fontSize: 12 }}>── OR PASTE DIRECTLY ──</div>
+            <div className="divider-text">or paste directly</div>
 
-            <textarea placeholder="Paste user feedback here... (interview notes, survey responses, app reviews, support tickets)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+            <textarea placeholder="Paste user feedback here — interview notes, app reviews, support tickets, survey responses..." value={feedback} onChange={(e) => setFeedback(e.target.value)} />
 
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, alignItems: "center" }}>
-              <button className="btn-ghost" onClick={() => { setFeedback(sampleData); }}>Load sample feedback</button>
-              <button className="btn" onClick={() => feedback.trim() && runPipeline(feedback)} disabled={!feedback.trim()}>
-                Analyze Feedback →
-              </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+              <button className="btn-sample" onClick={() => setFeedback(sampleData)}>→ Load sample feedback</button>
+              <button className="btn-primary" onClick={() => feedback.trim() && runPipeline(feedback)} disabled={!feedback.trim()}>Analyze →</button>
             </div>
           </div>
         )}
 
         {/* Loading */}
         {(stage === "analyzing" || stage === "speccing") && (
-          <div className="fade-in" style={{ textAlign: "center", padding: "80px 20px" }}>
-            <div style={{ fontSize: 48, marginBottom: 24 }} className="pulse">{stage === "speccing" ? "📋" : "🔍"}</div>
-            <p style={{ fontSize: 16, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>
-              {stage === "analyzing" ? "Identifying themes & priorities..." : "Generating feature spec..."}
-            </p>
-            <p style={{ color: "#475569", fontSize: 13 }}>AI is analyzing your data</p>
-            <div style={{ width: 200, margin: "24px auto", background: "#1e1e2e", borderRadius: 4, height: 4, overflow: "hidden" }}>
-              <div style={{ height: "100%", background: "linear-gradient(90deg,#4f46e5,#7c3aed)", borderRadius: 4, animation: "slide 1.5s ease infinite" }} />
-            </div>
+          <div className="loading-wrap fade-in">
+            <span className="loading-glyph">{stage === "speccing" ? "§" : "¶"}</span>
+            <p className="display" style={{ fontSize: 22, marginBottom: 8 }}>{stage === "analyzing" ? "Identifying themes..." : "Writing spec..."}</p>
+            <p style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 2, textTransform: "uppercase" }}>AI is analyzing your data</p>
+            <div className="loading-bar" />
           </div>
         )}
 
         {/* Results */}
         {stage === "done" && clusters.length > 0 && !spec && (
           <div className="fade-in">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
               <div>
-                <h2 style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, marginBottom: 4 }}>{clusters.length} Themes Found</h2>
-                <p style={{ color: "#64748b", fontSize: 12 }}>Ranked by priority. Click any theme to generate a full spec.</p>
+                <p className="section-label">Analysis complete</p>
+                <h2 className="display" style={{ fontSize: 36, fontWeight: 900, letterSpacing: -1 }}>{clusters.length} themes identified</h2>
               </div>
-              <button className="btn-ghost" onClick={() => { setClusters([]); setFeedback(""); setStage("idle"); }}>← New Analysis</button>
+              <button className="btn-ghost" onClick={() => { setClusters([]); setFeedback(""); setStage("idle"); }}>← New analysis</button>
             </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {clusters.map((c, i) => (
-                <div key={c.id} className={`card${selectedFeature?.id === c.id ? " selected" : ""}`} onClick={() => generateSpec(c)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 24, color: "#2a2a3e", fontWeight: 800 }}>{String(i + 1).padStart(2, "0")}</span>
-                      <div>
-                        <h3 style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>{c.theme}</h3>
-                        <p style={{ color: "#64748b", fontSize: 12 }}>{c.problem}</p>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
-                      <div style={{ fontSize: 22, fontFamily: "'Syne',sans-serif", fontWeight: 800, color: priorityColor(c.priority_score) }}>{c.priority_score}</div>
-                      <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, fontSize: 10, border: `1px solid ${priorityColor(c.priority_score)}33`, background: `${priorityColor(c.priority_score)}11`, color: priorityColor(c.priority_score) }}>{priorityLabel(c.priority_score)}</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+            <hr className="rule-heavy" />
+            {clusters.map((c, i) => (
+              <div key={c.id} className="cluster-row" onClick={() => generateSpec(c)}>
+                <div className="cluster-num">{String(i + 1).padStart(2, "0")}</div>
+                <div>
+                  <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6, letterSpacing: -0.5 }}>{c.theme}</h3>
+                  <p style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.6, marginBottom: 12 }}>{c.problem}</p>
+                  <div className="two-col" style={{ gap: 16, marginBottom: 12 }}>
                     <div>
-                      <p style={{ color: "#475569", fontSize: 10, letterSpacing: 1, marginBottom: 4 }}>FREQUENCY</p>
-                      <div className="bar-bg"><div className="bar-fill" style={{ width: `${c.frequency * 10}%`, background: "#4f46e5" }} /></div>
+                      <div className="bar-label"><span>Frequency</span><span>{c.frequency}/10</span></div>
+                      <div className="bar-track"><div className="bar-fill" style={{ width: `${c.frequency * 10}%` }} /></div>
                     </div>
                     <div>
-                      <p style={{ color: "#475569", fontSize: 10, letterSpacing: 1, marginBottom: 4 }}>SEVERITY</p>
-                      <div className="bar-bg"><div className="bar-fill" style={{ width: `${c.severity * 10}%`, background: "#7c3aed" }} /></div>
+                      <div className="bar-label"><span>Severity</span><span>{c.severity}/10</span></div>
+                      <div className="bar-track"><div className="bar-fill" style={{ width: `${c.severity * 10}%` }} /></div>
                     </div>
                   </div>
-
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {c.quotes?.slice(0, 2).map((q, qi) => (
-                      <span key={qi} style={{ background: "#1e1e2e", padding: "4px 10px", borderRadius: 6, fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>"{q}"</span>
-                    ))}
-                  </div>
-                  <p style={{ marginTop: 12, fontSize: 11, color: "#4f46e5" }}>Click to generate full spec + dev tasks →</p>
+                  <div>{c.quotes?.slice(0, 2).map((q, qi) => <span key={qi} className="quote-chip">"{q}"</span>)}</div>
+                  <p style={{ marginTop: 12, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "var(--ink3)" }}>Click to generate full spec →</p>
                 </div>
-              ))}
-            </div>
+                <div style={{ textAlign: "right" }}>
+                  <div className="cluster-score" style={{ color: priorityColor(c.priority_score) }}>{c.priority_score}</div>
+                  <div className="priority-tag" style={{ color: priorityColor(c.priority_score) }}>{priorityLabel(c.priority_score)}</div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
         {/* Spec */}
         {spec && (
           <div className="fade-in">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
               <div>
-                <h2 style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, marginBottom: 4 }}>{spec.title}</h2>
-                <p style={{ color: "#64748b", fontSize: 12 }}>Full product spec — ready for Cursor or Claude Code</p>
+                <p className="section-label">Product spec</p>
+                <h2 className="display" style={{ fontSize: 32, fontWeight: 900, letterSpacing: -1, maxWidth: 600 }}>{spec.title}</h2>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn-ghost" onClick={() => { setSpec(null); setSelectedFeature(null); }}>← Back</button>
-                <button className="btn" onClick={() => {
-                  const md = `# ${spec.title}\n\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map((m) => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map((s) => `- ${s}`).join("\n")}\n\n## UI Changes\n${spec.ui_changes?.map((u) => `- ${u}`).join("\n")}\n\n## Data Model\n${spec.data_model_changes?.map((d) => `- ${d}`).join("\n")}\n\n## Dev Tasks\n${spec.dev_tasks?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`;
+                <button className="btn-primary" onClick={() => {
+                  const md = `# ${spec.title}\n\n## Problem\n${spec.problem_statement}\n\n## Why Now\n${spec.why_now}\n\n## Success Metrics\n${spec.success_metrics?.map(m => `- ${m}`).join("\n")}\n\n## User Stories\n${spec.user_stories?.map(s => `- ${s}`).join("\n")}\n\n## UI Changes\n${spec.ui_changes?.map(u => `- ${u}`).join("\n")}\n\n## Data Model\n${spec.data_model_changes?.map(d => `- ${d}`).join("\n")}\n\n## Dev Tasks\n${spec.dev_tasks?.map((t, i) => `### ${i + 1}. ${t.title}\n${t.description}\n⏱ ${t.estimate_hours}h`).join("\n\n")}`;
                   navigator.clipboard.writeText(md);
-                }}>Copy as Markdown</button>
+                }}>Copy MD</button>
+              </div>
+            </div>
+            <hr className="rule-heavy" />
+
+            <div className="spec-block">
+              <div className="spec-block-label">Problem statement</div>
+              <p style={{ fontSize: 15, lineHeight: 1.8, color: "var(--ink2)" }}>{spec.problem_statement}</p>
+              <div className="pull-quote">{spec.why_now}</div>
+            </div>
+
+            <div className="two-col">
+              <div className="spec-block">
+                <div className="spec-block-label">Success metrics</div>
+                {spec.success_metrics?.map((m, i) => <div key={i} className="spec-item"><span className="spec-bullet">◆</span><span>{m}</span></div>)}
+              </div>
+              <div className="spec-block">
+                <div className="spec-block-label">User stories</div>
+                {spec.user_stories?.map((s, i) => <div key={i} className="spec-item"><span className="spec-bullet">→</span><span>{s}</span></div>)}
               </div>
             </div>
 
-            <div className="spec-section">
-              <p className="spec-label">Problem Statement</p>
-              <p style={{ color: "#cbd5e1", fontSize: 14, lineHeight: 1.6 }}>{spec.problem_statement}</p>
-              <div style={{ marginTop: 12, padding: "8px 12px", background: "#111118", borderRadius: 8, borderLeft: "3px solid #4f46e5" }}>
-                <p style={{ color: "#94a3b8", fontSize: 12 }}><strong style={{ color: "#4f46e5" }}>Why now:</strong> {spec.why_now}</p>
+            <div className="two-col">
+              <div className="spec-block">
+                <div className="spec-block-label">UI changes</div>
+                {spec.ui_changes?.map((u, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{u}</span></div>)}
+              </div>
+              <div className="spec-block">
+                <div className="spec-block-label">Data model changes</div>
+                {spec.data_model_changes?.map((d, i) => <div key={i} className="spec-item"><span className="spec-bullet">—</span><span>{d}</span></div>)}
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div className="spec-section">
-                <p className="spec-label">Success Metrics</p>
-                {spec.success_metrics?.map((m, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                    <span style={{ color: "#22c55e" }}>◆</span>
-                    <p style={{ color: "#cbd5e1", fontSize: 13 }}>{m}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="spec-section">
-                <p className="spec-label">User Stories</p>
-                {spec.user_stories?.map((s, i) => (
-                  <div key={i} style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8, lineHeight: 1.5, padding: 8, background: "#111118", borderRadius: 6 }}>{s}</div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div className="spec-section">
-                <p className="spec-label">UI Changes</p>
-                {spec.ui_changes?.map((u, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: "#7c3aed" }}>→</span>
-                    <p style={{ color: "#cbd5e1", fontSize: 13 }}>{u}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="spec-section">
-                <p className="spec-label">Data Model Changes</p>
-                {spec.data_model_changes?.map((d, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: "#f97316" }}>⬡</span>
-                    <p style={{ color: "#cbd5e1", fontSize: 13 }}>{d}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="spec-section">
-              <p className="spec-label">Dev Tasks — Paste into Cursor or Claude Code</p>
+            <div className="spec-block">
+              <div className="spec-block-label">Dev tasks — paste into Cursor or Claude Code</div>
               {spec.dev_tasks?.map((t, i) => (
-                <div key={i} className="task-item">
-                  <div style={{ width: 24, height: 24, borderRadius: 6, background: "#1e1e2e", color: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 500, flexShrink: 0 }}>{i + 1}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                      <p style={{ fontSize: 13, fontWeight: 500 }}>{t.title}</p>
-                      <span style={{ fontSize: 11, color: "#475569", background: "#1e1e2e", padding: "2px 8px", borderRadius: 4 }}>~{t.estimate_hours}h</span>
-                    </div>
-                    <p style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{t.description}</p>
+                <div key={i} className="task-row">
+                  <div style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1, paddingTop: 2 }}>{String(i + 1).padStart(2, "0")}</div>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, letterSpacing: -0.3 }}>{t.title}</p>
+                    <p style={{ fontSize: 12, color: "var(--ink2)", lineHeight: 1.6 }}>{t.description}</p>
                   </div>
+                  <div style={{ fontSize: 10, letterSpacing: 1, color: "var(--ink3)", whiteSpace: "nowrap", paddingTop: 2 }}>~{t.estimate_hours}h</div>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {error && (
-          <div style={{ background: "#1a0a0a", border: "1px solid #7f1d1d", borderRadius: 8, padding: 12, color: "#fca5a5", fontSize: 13, marginTop: 16 }}>
-            ⚠ {error}
-          </div>
-        )}
+        {error && <div className="error-bar">⚠ {error}</div>}
+      </div>
+
+      {/* Footer */}
+      <div style={{ borderTop: "3px solid var(--ink)", padding: "20px 48px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 80 }}>
+        <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "var(--ink3)" }}>PM·AI © 2026</span>
+        <span className="display" style={{ fontSize: 20, fontWeight: 900 }}>PM·AI</span>
+        <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "var(--ink3)" }}>Built on YC RFS</span>
       </div>
     </div>
   );
