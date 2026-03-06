@@ -85,6 +85,7 @@ export default function App() {
   const [spec, setSpec] = useState<Spec | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [productContext, setProductContext] = useState("");
 
   const runPipeline = async (text: string) => {
     setError(null);
@@ -94,8 +95,8 @@ export default function App() {
       setStage("analyzing");
       const lines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 10);
       const feedbackBlock = lines.slice(0, 60).join("\n");
-      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`);
-      setClusters(result.sort((a, b) => b.priority_score - a.priority_score));
+      const context = productContext.trim() ? `Product context: ${productContext.trim()}\n\n` : "";
+      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `${context}Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`);      setClusters(result.sort((a, b) => b.priority_score - a.priority_score));
       setStage("done");
     } catch (e: unknown) {
       setError("Analysis failed: " + (e instanceof Error ? e.message : String(e)));
@@ -108,8 +109,8 @@ export default function App() {
     setSpec(null);
     setStage("speccing");
     try {
-      const result: Spec = await callClaude(SYSTEM_PROMPT_SPEC, `Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);
-      setSpec(result);
+      const context = productContext.trim() ? `Product context: ${productContext.trim()}\n\n` : "";
+      const result: Spec = await callClaude(SYSTEM_PROMPT_SPEC, `${context}Generate a full product spec for:\n\nTheme: ${feature.theme}\nProblem: ${feature.problem}\nQuotes: ${feature.quotes.join(" | ")}\nPriority: ${feature.priority_score}`);      setSpec(result);
       setStage("done");
     } catch (e: unknown) {
       setError("Spec failed: " + (e instanceof Error ? e.message : String(e)));
@@ -248,6 +249,30 @@ export default function App() {
               <p style={{ fontSize: 13, color: "var(--ink2)", marginBottom: 6 }}>Drop your feedback file here</p>
               <p style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1 }}>CSV or TXT · click to browse</p>
               <input id="file-input" type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            </div>
+            
+            <div style={{ marginBottom: 28 }}>
+              <p style={{ fontSize: 9, letterSpacing: 4, textTransform: "uppercase", color: "var(--ink3)", marginBottom: 8 }}>
+                Product context <span style={{ color: "var(--ink3)", fontWeight: 300 }}>(optional but recommended)</span>
+              </p>
+              <input
+                type="text"
+                placeholder="e.g. A B2B project management tool for engineering teams at startups"
+                value={productContext}
+                onChange={(e) => setProductContext(e.target.value)}
+                style={{
+                  width: "100%",
+                  background: "var(--bg2)",
+                  border: "1px solid var(--rule)",
+                  borderBottom: "2px solid var(--ink)",
+                  color: "var(--ink)",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 12,
+                  padding: "12px 16px",
+                  outline: "none",
+                  letterSpacing: 0.5,
+                }}
+              />
             </div>
 
             <div className="divider-text">or paste directly</div>
