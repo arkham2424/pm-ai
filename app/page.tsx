@@ -131,7 +131,7 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Playfair+Display:wght@700;900&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
-          --bg: #F5F0E8; --bg2: #EDE8DF; --ink: #1a1a1a; --ink2: #555; --ink3: #999; --rule: #D4CFC6;
+          --bg: #F5F0E8; --bg2: #EDE8DF; --ink: #0a0a0a; --ink2: #2a2a2a; --ink3: #666; --rule: #C4BFB6;
         }
         body { background: var(--bg); }
         .display { font-family: 'Playfair Display', serif; }
