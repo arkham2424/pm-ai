@@ -85,6 +85,13 @@ export default function App() {
   const [spec, setSpec] = useState<Spec | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [history, setHistory] = useState<{id: string, date: string, context: string, clusters: Cluster[]}[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(localStorage.getItem("pm-ai-history") || "[]"); } 
+    catch { return []; }
+  });
+  const [showHistory, setShowHistory] = useState(false);
+
   const [productContext, setProductContext] = useState("");
 
   const runPipeline = async (text: string) => {
@@ -96,7 +103,18 @@ export default function App() {
       const lines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 10);
       const feedbackBlock = lines.slice(0, 60).join("\n");
       const context = productContext.trim() ? `Product context: ${productContext.trim()}\n\n` : "";
-      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `${context}Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`);      setClusters(result.sort((a, b) => b.priority_score - a.priority_score));
+      const result: Cluster[] = await callClaude(SYSTEM_PROMPT_ANALYZE, `${context}Here is user feedback:\n\n${feedbackBlock}\n\nIdentify 4-6 key themes.`); 
+      const sorted = result.sort((a, b) => b.priority_score - a.priority_score);
+      setClusters(sorted);
+      const newEntry = {
+        id: Date.now().toString(),
+        date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        context: productContext.trim() || "No context provided",
+        clusters: sorted,
+      };
+      const updated = [newEntry, ...history].slice(0, 10); // keep last 10
+      setHistory(updated);
+      localStorage.setItem("pm-ai-history", JSON.stringify(updated));
       setStage("done");
     } catch (e: unknown) {
       setError("Analysis failed: " + (e instanceof Error ? e.message : String(e)));
@@ -212,7 +230,11 @@ export default function App() {
         <div style={{ textAlign: "center" }}>
           <div className="display" style={{ fontSize: 28, fontWeight: 900, letterSpacing: -1 }}>PM·AI</div>
         </div>
-        <div style={{ textAlign: "right", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "var(--ink3)" }}>Free · Open Source</div>
+        <div style={{ textAlign: "right" }}>
+          <button className="btn-ghost" onClick={() => setShowHistory(!showHistory)}>
+            {showHistory ? "← Back" : `History (${history.length})`}
+          </button>
+        </div>
       </nav>
 
       {/* Masthead */}
@@ -236,7 +258,40 @@ export default function App() {
       </div>
 
       <div className="main">
-
+        
+        {/* History Panel */}
+        {showHistory && (
+          <div className="fade-in">
+            <div style={{ marginBottom: 32 }}>
+              <p className="section-label">Past analyses</p>
+              <h2 className="display" style={{ fontSize: 36, fontWeight: 900, letterSpacing: -1 }}>History</h2>
+            </div>
+            <hr className="rule-heavy" />
+            {history.length === 0 && (
+              <p style={{ color: "var(--ink3)", fontSize: 13, padding: "40px 0", textAlign: "center" }}>No analyses yet — run your first one!</p>
+            )}
+            {history.map((entry) => (
+              <div key={entry.id} style={{ padding: "20px 0", borderBottom: "1px solid var(--rule)", cursor: "pointer" }}
+                onClick={() => { setClusters(entry.clusters); setStage("done"); setShowHistory(false); setSpec(null); }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{entry.context}</p>
+                    <p style={{ fontSize: 11, color: "var(--ink3)", letterSpacing: 1 }}>{entry.clusters.length} themes · {entry.date}</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", maxWidth: 400, justifyContent: "flex-end" }}>
+                    {entry.clusters.slice(0, 3).map((c) => (
+                      <span key={c.id} style={{ fontSize: 10, padding: "3px 10px", border: "1px solid var(--rule)", color: "var(--ink2)", letterSpacing: 1 }}>
+                        {c.theme}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <p style={{ marginTop: 10, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "var(--ink3)" }}>Click to restore →</p>
+              </div>
+            ))}
+          </div>
+        )}
+        
         {/* Upload */}
         {stage === "idle" && clusters.length === 0 && (
           <div className="fade-in">
