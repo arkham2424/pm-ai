@@ -1,4 +1,21 @@
 "use client";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useState, useCallback, useEffect } from "react";
 const SYSTEM_PROMPT_ANALYZE = `You are a senior product manager AI. You will receive user feedback.
 
@@ -188,6 +205,46 @@ const downloadPDF = (spec: Spec) => {
 
 const priorityColor = (score: number) => score >= 7 ? "#c0392b" : score >= 5 ? "#d35400" : "#27ae60";
 const priorityLabel = (score: number) => score >= 7 ? "CRITICAL" : score >= 5 ? "HIGH" : "MEDIUM";
+function SortableCluster({ c, i, onSelect }: { c: Cluster; i: number; onSelect: (c: Cluster) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: c.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    cursor: "grab",
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div className="cluster-row" style={{ cursor: "grab" }} onClick={() => onSelect(c)}>
+        <div {...listeners} onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, cursor: "grab", userSelect: "none", padding: "4px" }} title="Drag to reorder">
+          <div className="cluster-num" style={{ pointerEvents: "none" }}>{String(i + 1).padStart(2, "0")}</div>
+          <div style={{ color: "var(--ink3)", fontSize: 16, lineHeight: 1 }}>⠿</div>
+        </div>
+        <div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6, letterSpacing: -0.5 }}>{c.theme}</h3>
+          <p style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.6, marginBottom: 12 }}>{c.problem}</p>
+          <div className="two-col" style={{ gap: 16, marginBottom: 12 }}>
+            <div>
+              <div className="bar-label"><span>Frequency</span><span>{c.frequency}/10</span></div>
+              <div className="bar-track"><div className="bar-fill" style={{ width: `${c.frequency * 10}%` }} /></div>
+            </div>
+            <div>
+              <div className="bar-label"><span>Severity</span><span>{c.severity}/10</span></div>
+              <div className="bar-track"><div className="bar-fill" style={{ width: `${c.severity * 10}%` }} /></div>
+            </div>
+          </div>
+          <div>{c.quotes?.slice(0, 2).map((q, qi) => <span key={qi} className="quote-chip">"{q}"</span>)}</div>
+          <p style={{ marginTop: 12, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "var(--ink3)" }}>Click to generate spec · drag to reorder →</p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div className="cluster-score" style={{ color: priorityColor(c.priority_score) }}>{c.priority_score}</div>
+          <div className="priority-tag" style={{ color: priorityColor(c.priority_score) }}>{priorityLabel(c.priority_score)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [stage, setStage] = useState("idle");
@@ -206,6 +263,21 @@ export default function App() {
     } catch { }
   }, []);
   const [showHistory, setShowHistory] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setClusters((items) => {
+        const oldIndex = items.findIndex((i) => i.id === active.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
 
   const [productContext, setProductContext] = useState("");
 
@@ -624,31 +696,13 @@ export default function App() {
               <button className="btn-ghost" onClick={() => { setClusters([]); setFeedback(""); setStage("idle"); }}>← New analysis</button>
             </div>
             <hr className="rule-heavy" />
-            {clusters.map((c, i) => (
-              <div key={c.id} className="cluster-row" onClick={() => generateSpec(c)}>
-                <div className="cluster-num">{String(i + 1).padStart(2, "0")}</div>
-                <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6, letterSpacing: -0.5 }}>{c.theme}</h3>
-                  <p style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.6, marginBottom: 12 }}>{c.problem}</p>
-                  <div className="two-col" style={{ gap: 16, marginBottom: 12 }}>
-                    <div>
-                      <div className="bar-label"><span>Frequency</span><span>{c.frequency}/10</span></div>
-                      <div className="bar-track"><div className="bar-fill" style={{ width: `${c.frequency * 10}%` }} /></div>
-                    </div>
-                    <div>
-                      <div className="bar-label"><span>Severity</span><span>{c.severity}/10</span></div>
-                      <div className="bar-track"><div className="bar-fill" style={{ width: `${c.severity * 10}%` }} /></div>
-                    </div>
-                  </div>
-                  <div>{c.quotes?.slice(0, 2).map((q, qi) => <span key={qi} className="quote-chip">"{q}"</span>)}</div>
-                  <p style={{ marginTop: 12, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "var(--ink3)" }}>Click to generate full spec →</p>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div className="cluster-score" style={{ color: priorityColor(c.priority_score) }}>{c.priority_score}</div>
-                  <div className="priority-tag" style={{ color: priorityColor(c.priority_score) }}>{priorityLabel(c.priority_score)}</div>
-                </div>
-              </div>
-            ))}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={clusters.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                {clusters.map((c, i) => (
+                  <SortableCluster key={c.id} c={c} i={i} onSelect={generateSpec} />
+                ))}
+              </SortableContext>
+            </DndContext>
           </div>
         )}
 
