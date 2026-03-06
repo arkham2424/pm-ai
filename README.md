@@ -33,8 +33,6 @@ PM·AI solves that. Paste in raw user feedback (interview notes, app reviews, su
 - 📋 **Copy as Markdown** — paste directly into Cursor, Claude Code, Notion, or Linear
 - 🕓 **History** — last 10 analyses saved locally in your browser
 - 🎭 **Live Demo** — pre-loaded Notion feedback so visitors see real output instantly
-- 📈 **Analytics** — Vercel Analytics to track real usage
-- 🖼️ **OG Image** — rich link previews when shared on LinkedIn or Twitter
 
 ---
 
