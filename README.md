@@ -2,7 +2,7 @@
 
 > Turn raw user feedback into prioritized feature specs in seconds.
 
-![Status](https://img.shields.io/badge/status-live-22c55e?style=flat-square) ![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js) ![OpenRouter](https://img.shields.io/badge/AI-OpenRouter-f97316?style=flat-square) ![Vercel](https://img.shields.io/badge/deployed-Vercel-black?style=flat-square&logo=vercel) ![Cost](https://img.shields.io/badge/cost-%240%2Fmonth-22c55e?style=flat-square)
+![Status](https://img.shields.io/badge/status-live-22c55e?style=flat-square) ![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js) ![Anthropic](https://img.shields.io/badge/AI-Anthropic-f97316?style=flat-square) ![Vercel](https://img.shields.io/badge/deployed-Vercel-black?style=flat-square&logo=vercel)
 
 **[→ Live Demo](https://pm-ai-eight.vercel.app/)**
 
@@ -43,7 +43,7 @@ PM·AI solves that. Paste in raw user feedback (interview notes, app reviews, su
 | Frontend | Next.js 15 (App Router) + TypeScript |
 | Styling | Inline CSS + custom animations |
 | Fonts | Playfair Display + JetBrains Mono |
-| AI | OpenRouter (free tier) |
+| AI | Anthropic Claude API |
 | Drag & Drop | @dnd-kit/core |
 | Analytics | Vercel Analytics |
 | Deployment | Vercel (free tier) |
@@ -51,19 +51,11 @@ PM·AI solves that. Paste in raw user feedback (interview notes, app reviews, su
 
 ---
 
-## Why OpenRouter?
+## Anthropic configuration
 
-- Access to dozens of free LLMs with a single API key
-- OpenAI-compatible API — swap models with one line change
-- No credit card required to get started
-
-**Recommended free models** (change one line in `route.ts`):
-
-| Model | Notes |
-|-------|-------|
-| `meta-llama/llama-3.3-8b-instruct:free` | Best for structured JSON output |
-| `google/gemini-2.0-flash-thinking-exp:free` | Strongest reasoning |
-| `mistralai/mistral-7b-instruct:free` | Fast and lightweight |
+- API calls are made server-side in `app/api/analyze/route.ts`.
+- Default model is `claude-sonnet-4-6`.
+- You can override the model with `ANTHROPIC_MODEL` in `.env.local`.
 
 ---
 
@@ -71,7 +63,7 @@ PM·AI solves that. Paste in raw user feedback (interview notes, app reviews, su
 
 ### Prerequisites
 - Node.js 18+
-- A free OpenRouter API key at [openrouter.ai](https://openrouter.ai)
+- An Anthropic API key from [console.anthropic.com](https://console.anthropic.com)
 
 ### Setup
 
@@ -86,14 +78,15 @@ npm install
 
 ### ⚠️ Required: Create your environment file
 
-This app needs a free OpenRouter API key to run. Without it, all analysis requests will fail.
+This app needs an Anthropic API key to run. Without it, all analysis requests will fail.
 
-1. Go to **[openrouter.ai](https://openrouter.ai)** → Sign up → **Keys** → Create Key
+1. Go to **[console.anthropic.com](https://console.anthropic.com)** → **API Keys** → Create Key
 2. Create a file called `.env.local` in the **root of the project** (same level as `package.json`)
 3. Add this line inside it:
 
 ```
-OPENROUTER_API_KEY=sk-or-your-key-here
+ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+ANTHROPIC_MODEL=claude-sonnet-4-6
 ```
 
 > `.env.local` is already in `.gitignore` — it will never be committed. Every developer cloning this repo needs to create their own.

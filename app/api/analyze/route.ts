@@ -1,37 +1,56 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
+
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+const anthropicModel = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+const anthropic = anthropicApiKey ? new Anthropic({ apiKey: anthropicApiKey }) : null;
 
 export async function POST(req: NextRequest) {
   try {
     const { systemPrompt, userMessage } = await req.json();
+    if (typeof systemPrompt !== "string" || typeof userMessage !== "string") {
+      return NextResponse.json(
+        { error: "systemPrompt and userMessage must be strings." },
+        { status: 400 },
+      );
+    }
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "arcee-ai/trinity-mini:free",
-        max_tokens: 4096,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-      }),
+    if (!anthropic) {
+      return NextResponse.json(
+        { error: "ANTHROPIC_API_KEY is not configured on the server." },
+        { status: 500 },
+      );
+    }
+
+    const response = await anthropic.messages.create({
+      model: anthropicModel,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
     });
 
-    const data = await response.json();
-    
-    // LOG EVERYTHING so we can see what's coming back
-    console.log("STATUS:", response.status);
-    console.log("OPENROUTER RESPONSE:", JSON.stringify(data, null, 2));
+    const text = response.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("\n")
+      .trim();
 
-    const text = data.choices?.[0]?.message?.content ?? "";
+    if (!text) {
+      return NextResponse.json(
+        { error: "Anthropic returned an empty text response." },
+        { status: 502 },
+      );
+    }
+
     return NextResponse.json({ text });
-
   } catch (error: unknown) {
+    if (error instanceof Anthropic.APIError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status ?? 500 },
+      );
+    }
+
     const message = error instanceof Error ? error.message : String(error);
-    console.log("CAUGHT ERROR:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
