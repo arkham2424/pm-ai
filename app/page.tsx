@@ -112,7 +112,19 @@ const callClaude = async (systemPrompt: string, userMessage: string) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ systemPrompt, userMessage }),
   });
-  const { text } = await res.json();
+  const payload: unknown = await res.json();
+  const data = payload && typeof payload === "object" ? (payload as { text?: unknown; error?: unknown }) : {};
+
+  if (!res.ok) {
+    const message = typeof data.error === "string" ? data.error : `Request failed (${res.status})`;
+    throw new Error(message);
+  }
+
+  if (typeof data.text !== "string") {
+    throw new Error("Analyze API returned an invalid response.");
+  }
+
+  const text = data.text;
   const cleaned = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(cleaned);
 
